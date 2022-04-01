@@ -1,0 +1,10 @@
+apiVersion: v2
+name: cloud-provider-cherry
+description: Kubernetes Cloud Provider for Cherry Servers
+type: application
+version: "0.1.0"
+appVersion: "main"
+home: https://cherryservers.com
+sources:
+  - https://github.com/cherryservers/cloud-provider-cherry
+
