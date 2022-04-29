@@ -168,7 +168,7 @@ func TestInstanceType(t *testing.T) {
 		{"empty name", "", "", cloudprovider.InstanceNotFound},
 		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("Error: Error response from API: invalid server ID: thisdoesnotexist")},
 		{"unknown name", fmt.Sprintf("%d", randomID), "", cloudprovider.InstanceNotFound},
-		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), server.Plans.Name, nil},
+		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), fmt.Sprintf("%d-%s", server.Plans.ID, server.Plans.Name), nil},
 	}
 
 	for i, tt := range tests {
