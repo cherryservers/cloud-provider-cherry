@@ -30,7 +30,7 @@ jobs:
 
     - name: Docker manager metadata
       id: meta
-      uses: docker/metadata-action@v3
+      uses: docker/metadata-action@v4
       with:
         images: ${{ steps.image-urls.outputs.images }}
         tags: |
@@ -88,7 +88,7 @@ jobs:
 
     - name: Docker manager metadata
       id: meta
-      uses: docker/metadata-action@v3
+      uses: docker/metadata-action@v4
       with:
         images: ${{ steps.image-urls.outputs.images }}
         tags: |
