@@ -100,16 +100,16 @@ stringData:
 Then apply the secret, e.g.:
 
 ```bash
-kubectl apply -f /tmp/secret.yaml`
+kubectl apply -f /tmp/secret.yaml
 ```
 
 You can confirm that the secret was created with the following:
 
-````bash
+```bash
 $ kubectl -n kube-system get secrets cherry-cloud-config
 NAME                  TYPE                                  DATA      AGE
 cherry-cloud-config   Opaque                                1         2m
-````
+```
 
 ### Deploy CCM
 
