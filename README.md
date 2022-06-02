@@ -92,7 +92,7 @@ stringData:
   cloud-sa.json: |
     {
     "apiKey": "abc123abc123abc123",
-    "projectID": "abc123abc123abc123"
+    "projectID": 0123456789
     }  
 ```
 
