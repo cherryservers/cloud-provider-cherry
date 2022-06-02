@@ -57,7 +57,7 @@ spec:
       volumes:
         - name: cloud-sa-volume
           secret:
-            secretName: metal-cloud-config
+            secretName: cherry-cloud-config
 
 ---
 apiVersion: v1
