@@ -28,7 +28,7 @@ Recommended versions of Cherry Servers CCM based on your Kubernetes version:
 
 1. Set Kubernetes binary arguments correctly
 1. Get your Cherry Servers project ID and secret API token
-1. Deploy your Cherry Servers project ID and secret API token to your cluster in a [Secret](https://kubernetes.io/docs/concepts/configuration/secret/)
+1. Deploy your Cherry Servers project ID and secret API token to your cluster in a [secret](https://kubernetes.io/docs/concepts/configuration/secret/)
 1. Deploy the CCM
 1. Deploy the load balancer (optional)
 
@@ -120,7 +120,7 @@ RELEASE=v2.0.0
 kubectl apply -f https://github.com/cherryservers/cloud-provider-cherry/releases/download/${RELEASE}/deployment.yaml
 ```
 
-The CCM uses multiple configuration options. See the [configuration][#Configuration] section for all of the options.
+The CCM uses multiple configuration options. See the [configuration](#Configuration) section for all of the options.
 
 #### Deploy Load Balancer
 
@@ -145,7 +145,7 @@ The Cherry Servers CCM has multiple configuration options. These include several
 
 1. Command-line flags, e.g. `--option value` or `--option=value`; if not set, then
 1. Environment variables, e.g. `CCM_OPTION=value`; if not set, then
-1. Field in the configuration [Secret](https://kubernetes.io/docs/concepts/configuration/secret/); if not set, then
+1. Field in the configuration [secret](https://kubernetes.io/docs/concepts/configuration/secret/); if not set, then
 1. Default, if available; if not available, then an error
 
 This section lists each configuration option, and whether it can be set by each method.
@@ -406,9 +406,9 @@ To enable CCM to manage the control plane FIP:
 1. Create a Floating IP, using the Cherry Servers API, Web UI or CLI
 1. Put an arbitrary but unique tag on the FIP
 1. When starting the CCM
-   * set the [configuration][Configuration] for the control plane FIP tag, e.g. env var `CHERRY_FIP_TAG=<tag>`, where `<tag>` is whatever tag you set on the FIP
+   * set the [configuration](#Configuration) for the control plane FIP tag, e.g. env var `CHERRY_FIP_TAG=<tag>`, where `<tag>` is whatever tag you set on the FIP
    * (optional) set the port that the FIP should listen on; by default, or when set to `0`, it will use the same port as the `kube-apiserver` on the control plane nodes. This port can also be specified with `CHERRY_API_SERVER_PORT=<port>.`
-   * (optional) set the [configuration][Configuration] for using the host IP for control plane endpoint health checks. This is
+   * (optional) set the [configuration](#Configuration) for using the host IP for control plane endpoint health checks. This is
    needed when the FIP is configured as an loopback IP address
 
 Cherry Servers does not provide an as-a-service load balancer; this means that in some way we have to check if the Floating
@@ -484,7 +484,7 @@ If a loadbalancer is enabled, the CCM enables BGP for the project and enables it
 on all nodes as they come up. It retrieves the ASNs from the Cherry Servers
 API and sets it for each server instance.
 
-The set of servers on which BGP will be enabled can be filtered as well, using the the options in [Configuration][Configuration].
+The set of servers on which BGP will be enabled can be filtered as well, using the the options in [configuration](#Configuration).
 Value for node selector should be a valid Kubernetes label selector (e.g. key1=value1,key2=value2).
 
 ## Node Annotations
@@ -497,7 +497,7 @@ The Cherry Servers CCM sets Kubernetes annotations on each cluster node.
 * Source IP to use when communicating with peer, default annotation `cherryservers.com/bgp-peers-{{n}}-src-ip`
 * CIDR of the private network range in the project which this node is part of, default annotation `cherryservers.com/network-4-private`
 
-These annotation names can be overridden, if you so choose, using the options in [Configuration][Configuration].
+These annotation names can be overridden, if you so choose, using the options in [configuration](#Configuration).
 
 Note that the annotations for BGP peering are a _pattern_. There is one annotation per data point per peer,
 following the pattern `cherryservers.com/bgp-peers-{{n}}-<info>`, where:
