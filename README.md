@@ -409,7 +409,7 @@ To enable CCM to manage the control plane FIP:
    * set the [configuration](#Configuration) for the control plane FIP tag, e.g. env var `CHERRY_FIP_TAG=<tag>`, where `<tag>` is whatever tag you set on the FIP
    * (optional) set the port that the FIP should listen on; by default, or when set to `0`, it will use the same port as the `kube-apiserver` on the control plane nodes. This port can also be specified with `CHERRY_API_SERVER_PORT=<port>.`
    * (optional) set the [configuration](#Configuration) for using the host IP for control plane endpoint health checks. This is
-   needed when the FIP is configured as an loopback IP address
+   needed when the FIP is configured as a loopback IP address
 
 Cherry Servers does not provide an as-a-service load balancer; this means that in some way we have to check if the Floating
 IP is still assigned to an healthy control plane.
