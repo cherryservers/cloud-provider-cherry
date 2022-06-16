@@ -494,7 +494,6 @@ The Cherry Servers CCM sets Kubernetes annotations on each cluster node.
 * Peer ASN, default annotation `cherryservers.com/bgp-peers-{{n}}-peer-asn`
 * Peer IP, default annotation `cherryservers.com/bgp-peers-{{n}}-peer-ip`
 * Source IP to use when communicating with peer, default annotation `cherryservers.com/bgp-peers-{{n}}-src-ip`
-* CIDR of the private network range in the project which this node is part of, default annotation `cherryservers.com/network-4-private`
 
 These annotation names can be overridden, if you so choose, using the options in [configuration](#Configuration).
 
