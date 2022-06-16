@@ -162,7 +162,6 @@ This section lists each configuration option, and whether it can be set by each 
 | Kubernetes annotation to set BGP peer's ASN, {{n}} replaced with ordinal index of peer |   | `CHERRY_ANNOTATION_PEER_ASN` | `annotationPeerASN` | `"cherryservers.com/bgp-peers-{{n}}-peer-asn"` |
 | Kubernetes annotation to set BGP peer's IPs, {{n}} replaced with ordinal index of peer |   | `CHERRY_ANNOTATION_PEER_IP` | `annotationPeerIP` | `"cherryservers.com/bgp-peers-{{n}}-peer-ip"` |
 | Kubernetes annotation to set source IP for BGP peering, {{n}} replaced with ordinal index of peer |   | `CHERRY_ANNOTATION_SRC_IP` | `annotationSrcIP` | `"cherryservers.com/bgp-peers-{{n}}-src-ip"` |
-| Kubernetes annotation to set the CIDR for the network range of the private address |  | `CHERRY_ANNOTATION_NETWORK_IPV4_PRIVATE` |  `annotationNetworkIPv4Private` | `cherryservers.com/network-4-private` |
 | Kubernetes Service annotation to set Floating IP region |   | `CHERRY_ANNOTATION_FIP_REGION` | `annotationFIPRegion` | `"cherryservers.com/fip-region"` |
 | Tag for control plane Floating IP, in `"key=value"` format |    | `CHERRY_FIP_TAG` | `fipTag` | No control plane Floating IP |
 | Kubernetes API server port for Floating IP |     | `CHERRY_API_SERVER_PORT` | `apiServerPort` | Same as `kube-apiserver` on control plane nodes, same as `0` |
