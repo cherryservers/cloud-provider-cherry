@@ -204,7 +204,7 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 				AddFunc: func(obj interface{}) {
 					k8sService, _ := obj.(*v1.Service)
 					if k8sService.Namespace != metav1.NamespaceDefault || k8sService.Name != "kubernetes" {
-						klog.V(2).Info("handler services, ignoring %s/%s", k8sService.Namespace, k8sService.Name)
+						klog.V(2).Infof("handler services, ignoring %s/%s", k8sService.Namespace, k8sService.Name)
 						return
 					}
 					klog.Infof("handling add, service: %s/%s", k8sService.Namespace, k8sService.Name)
@@ -217,7 +217,7 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 				UpdateFunc: func(_, obj interface{}) {
 					k8sService, _ := obj.(*v1.Service)
 					if k8sService.Namespace != metav1.NamespaceDefault || k8sService.Name != "kubernetes" {
-						klog.V(2).Info("handler services, ignoring %s/%s", k8sService.Namespace, k8sService.Name)
+						klog.V(2).Infof("handler services, ignoring %s/%s", k8sService.Namespace, k8sService.Name)
 						return
 					}
 					klog.Infof("handling update, service: %s/%s", k8sService.Namespace, k8sService.Name)
