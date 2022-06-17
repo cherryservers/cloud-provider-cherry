@@ -170,6 +170,10 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 			Handler: cache.ResourceEventHandlerFuncs{
 				AddFunc: func(obj interface{}) {
 					k8sEndpoints, _ := obj.(*v1.Endpoints)
+					if k8sEndpoints.Namespace != metav1.NamespaceDefault || k8sEndpoints.Name != "kubernetes" {
+						klog.V(2).Infof("handler endpoints, ignoring %s/%s", k8sEndpoints.Namespace, k8sEndpoints.Name)
+						return
+					}
 					klog.Infof("handling add, endpoints: %s/%s", k8sEndpoints.Namespace, k8sEndpoints.Name)
 
 					if err := m.syncEndpoints(ctx, k8sEndpoints); err != nil {
@@ -179,6 +183,10 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 				},
 				UpdateFunc: func(_, obj interface{}) {
 					k8sEndpoints, _ := obj.(*v1.Endpoints)
+					if k8sEndpoints.Namespace != metav1.NamespaceDefault || k8sEndpoints.Name != "kubernetes" {
+						klog.V(2).Infof("handler endpoints, ignoring %s/%s", k8sEndpoints.Namespace, k8sEndpoints.Name)
+						return
+					}
 					klog.Infof("handling update, endpoints: %s/%s", k8sEndpoints.Namespace, k8sEndpoints.Name)
 
 					if err := m.syncEndpoints(ctx, k8sEndpoints); err != nil {
