@@ -1,7 +1,7 @@
 SHELL=/bin/sh
 BINARY ?= cloud-provider-cherry
 BUILD_IMAGE?=cherryservers/cloud-provider-cherry
-BUILDER_IMAGE?=golang:1.17-alpine3.15
+BUILDER_IMAGE?=golang:1.19-alpine
 PACKAGE_NAME?=github.com/cherryservers/cloud-provider-cherry
 GIT_VERSION?=$(shell git log -1 --format="%h")
 VERSION?=$(GIT_VERSION)
@@ -91,14 +91,14 @@ version: ## Report the version that would be put in the binary
 	@echo $(VERSION)
 
 fmt: golangci-lint  ## Format all source code files
-	@$(BUILD_CMD) $(LINTER) run --fix ./
+	@$(BUILD_CMD) $(LINTER) run --fix ./...
 
 golangci-lint: $(LINTER)
 $(LINTER):
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.44.2
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.50.1
 
 lint: golangci-lint ## Lint the files
-	@$(BUILD_CMD) $(LINTER) run ./
+	@$(BUILD_CMD) $(LINTER) run ./...
 
 test: ## Run unit tests
 	@$(BUILD_CMD) go test -short ./...
