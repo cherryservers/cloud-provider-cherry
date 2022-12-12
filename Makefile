@@ -95,7 +95,7 @@ fmt: golangci-lint  ## Format all source code files
 
 golangci-lint: $(LINTER)
 $(LINTER):
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.44.2
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.50.1
 
 lint: golangci-lint ## Lint the files
 	@$(BUILD_CMD) $(LINTER) run ./
