@@ -91,14 +91,14 @@ version: ## Report the version that would be put in the binary
 	@echo $(VERSION)
 
 fmt: golangci-lint  ## Format all source code files
-	@$(BUILD_CMD) $(LINTER) run --fix ./
+	@$(BUILD_CMD) $(LINTER) run --fix ./...
 
 golangci-lint: $(LINTER)
 $(LINTER):
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.50.1
 
 lint: golangci-lint ## Lint the files
-	@$(BUILD_CMD) $(LINTER) run ./
+	@$(BUILD_CMD) $(LINTER) run ./...
 
 test: ## Run unit tests
 	@$(BUILD_CMD) go test -short ./...
