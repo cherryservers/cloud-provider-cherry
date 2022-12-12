@@ -1,7 +1,7 @@
 SHELL=/bin/sh
 BINARY ?= cloud-provider-cherry
 BUILD_IMAGE?=cherryservers/cloud-provider-cherry
-BUILDER_IMAGE?=golang:1.17-alpine3.15
+BUILDER_IMAGE?=golang:1.19-alpine3.17
 PACKAGE_NAME?=github.com/cherryservers/cloud-provider-cherry
 GIT_VERSION?=$(shell git log -1 --format="%h")
 VERSION?=$(GIT_VERSION)
