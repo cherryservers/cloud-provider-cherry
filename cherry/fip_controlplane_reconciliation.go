@@ -32,22 +32,22 @@ const (
 var controlPlaneLabels = []string{"node-role.kubernetes.io/master", "node-role.kubernetes.io/control-plane"}
 
 /*
- controlPlaneEndpointManager checks the availability of an FloatingIP for
- the control plane and if it exists the reconciliation guarantees that it is
- attached to a healthy control plane.
+controlPlaneEndpointManager checks the availability of an FloatingIP for
+the control plane and if it exists the reconciliation guarantees that it is
+attached to a healthy control plane.
 
- The general steps are:
- 1. Check if the passed FloatingIP tags returns a valid FloatingIP via Cherry Servers API.
- 2. If there is NOT a FloatingIP with those tags just end the reconciliation
- 3. If there is a FloatingIP use the kubernetes client-go to check if it
- returns a valid response
- 4. If the response returned via client-go is good we do not need to do anything
- 5. If the response if wrong or it terminated it means that the device behind
- the FloatingIP is not working correctly and we have to find a new one.
- 6. Ping the other control plane available in the cluster, if one of them work
- assign the FloatingIP to that device.
- 7. If NO Control Planes succeed, the cluster is unhealthy and the
- reconciliation terminates without changing the current state of the system.
+The general steps are:
+1. Check if the passed FloatingIP tags returns a valid FloatingIP via Cherry Servers API.
+2. If there is NOT a FloatingIP with those tags just end the reconciliation
+3. If there is a FloatingIP use the kubernetes client-go to check if it
+returns a valid response
+4. If the response returned via client-go is good we do not need to do anything
+5. If the response if wrong or it terminated it means that the device behind
+the FloatingIP is not working correctly and we have to find a new one.
+6. Ping the other control plane available in the cluster, if one of them work
+assign the FloatingIP to that device.
+7. If NO Control Planes succeed, the cluster is unhealthy and the
+reconciliation terminates without changing the current state of the system.
 */
 type controlPlaneEndpointManager struct {
 	apiServerPort         int32 // node on which the FIP is listening
