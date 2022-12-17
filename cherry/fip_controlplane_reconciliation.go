@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	v1applyconfig "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -481,9 +482,20 @@ func (m *controlPlaneEndpointManager) syncService(ctx context.Context, k8sServic
 	// for ease of use
 	fip := controlPlaneEndpoint.Address
 
+	servicePortApplyConfig := v1applyconfig.ServicePort().
+		WithName("https").
+		WithPort(m.apiServerPort).
+		WithProtocol("TCP").
+		WithTargetPort(intstr.FromInt(int(m.nodeAPIServerPort)))
+
+	serviceSpecApplyConfig := v1applyconfig.ServiceSpec().
+		WithType(v1.ServiceTypeLoadBalancer).
+		WithLoadBalancerIP(fip).
+		WithPorts(servicePortApplyConfig)
+
 	applyConfig := v1applyconfig.Service(externalServiceName, externalServiceNamespace).
 		WithAnnotations(map[string]string{metallbAnnotation: metallbDisabledtag}).
-		WithSpec(ServiceSpecApplyConfig(fip, k8sService.Spec))
+		WithSpec(serviceSpecApplyConfig)
 
 	if _, err := m.k8sclient.CoreV1().Services(externalServiceNamespace).Apply(
 		ctx,

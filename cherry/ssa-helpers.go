@@ -56,24 +56,3 @@ func EndpointSubsetApplyConfig(subset v1.EndpointSubset) *v1applyconfig.Endpoint
 
 	return applyConfig
 }
-
-func ServicePortApplyConfig(port v1.ServicePort) *v1applyconfig.ServicePortApplyConfiguration {
-	applyConfig := v1applyconfig.ServicePort().WithName(port.Name).WithNodePort(port.NodePort).
-		WithPort(port.Port).WithProtocol(port.Protocol).WithTargetPort(port.TargetPort)
-
-	if port.AppProtocol != nil {
-		applyConfig = applyConfig.WithAppProtocol(*port.AppProtocol)
-	}
-
-	return applyConfig
-}
-
-func ServiceSpecApplyConfig(fip string, spec v1.ServiceSpec) *v1applyconfig.ServiceSpecApplyConfiguration {
-	applyConfig := v1applyconfig.ServiceSpec().WithType(v1.ServiceTypeLoadBalancer).WithLoadBalancerIP(fip)
-
-	for _, port := range spec.Ports {
-		applyConfig = applyConfig.WithPorts(ServicePortApplyConfig(port))
-	}
-
-	return applyConfig
-}
