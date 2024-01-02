@@ -187,7 +187,7 @@ func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, clusterName stri
 		// ensure BGP is enabled for the node, and get its config
 		bgpConfig, err := l.bgpEnabler.ensureNodeBGPEnabled(id)
 		if err != nil {
-			klog.Errorf("could not ensure BGP enabled for node %s: %w", node.Name, err)
+			klog.Errorf("could not ensure BGP enabled for node %s: %v", node.Name, err)
 			continue
 		}
 		klog.V(2).Infof("bgp enabled on node %s", node.Name)
@@ -422,13 +422,13 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 		// ensure BGP is enabled for the node
 		bgpConfig, err := l.bgpEnabler.ensureNodeBGPEnabled(id)
 		if err != nil {
-			klog.Errorf("could not ensure BGP enabled for node %s: %w", node.Name, err)
+			klog.Errorf("could not ensure BGP enabled for node %s: %v", node.Name, err)
 			continue
 		}
 		klog.V(2).Infof("bgp enabled on node %s", node.Name)
 		// ensure the node has the correct annotations
 		if err := l.annotateNode(ctx, node); err != nil {
-			klog.Errorf("failed to annotate node %s: %w", node.Name, err)
+			klog.Errorf("failed to annotate node %s: %v", node.Name, err)
 			continue
 		}
 		var peers []loadbalancers.Peer

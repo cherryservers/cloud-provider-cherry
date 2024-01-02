@@ -155,7 +155,7 @@ func serverByName(client *cherrygo.Client, projectID string, nodeName types.Node
 
 	for _, server := range servers {
 		if server.Hostname == string(nodeName) {
-			klog.V(2).Infof("Found server %s for nodeName %s", server.ID, nodeName)
+			klog.V(2).Infof("Found server %d for nodeName %s", server.ID, nodeName)
 			return &server, nil
 		}
 	}
