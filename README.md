@@ -16,11 +16,24 @@ This repository is **Maintained**!
 At the current state of Kubernetes, running the CCM requires a few things.
 Please read through the requirements carefully as they are critical to running the CCM on a Kubernetes cluster.
 
-### Version
+### Compatibility with Kubernetes
 
-Recommended versions of Cherry Servers CCM based on your Kubernetes version:
+The CCM is released with a specific semantic version that correlates with the Kubernetes upstream
+version. 
 
-* Cherry Servers CCM version v1.0.0+ supports Kubernetes version >=1.20.0
+* The major and minor versions are equivalent to the compatible upstream release.
+* The patch version is reserved for internal releases of the CCM.
+
+Currently, for a given cloud provider release version, compatibility is guaranteed only between
+that major/minor release and the corresponding Kubernetes major/minor version. That means
+you need to upgrade the cloud provider components every time you upgrade Kubernetes major or minor
+version.
+
+This is based on, but not identical to, [the external cloud provider versioning KEP](https://github.com/kubernetes/enhancements/tree/master/keps/sig-cloud-provider/1771-versioning-policy-for-external-cloud-providers).
+
+For example, any version 1.28.X of the CCM, for any `X`, should be compatible with 1.28.Y, for any `Y` of Kubernetes.
+
+However, other versions may work as well. For example, CCM 1.28.X may work with 1.29.Y, but it is not guaranteed.
 
 ## Deployment
 
@@ -519,40 +532,7 @@ If a loadbalancer is enabled, CCM creates a Cherry Servers Floating IP (FIP) res
 * `service="<service-hash>"` where `<service-hash>` is the sha256 hash of `<namespace>/<service-name>`. We do this so that the name of the service does not leak out to Cherry Servers itself.
 * `cluster=<clusterID>` where `<clusterID>` is the UID of the immutable `kube-system` namespace. We do this so that if someone runs two clusters in the same project, and there is one `Service` in each cluster with the same namespace and name, then the two FIPs will not conflict.
 
-## Running Locally
+## Building
 
-You can run the CCM locally on your laptop or VM, i.e. not in the cluster. This _dramatically_ speeds up development. To do so:
-
-1. Deploy everything except for the `Deployment` and, optionally, the `Secret`
-1. Build it for your local platform `make build`
-1. Set the environment variable `CCM_SECRET` to a file with the secret contents as a json, i.e. the content of the secret's `stringData`, e.g. `CCM_SECRET=ccm-secret.yaml`
-1. Set the environment variable `KUBECONFIG` to a kubeconfig file with sufficient access to the cluster, e.g. `KUBECONFIG=mykubeconfig`
-1. Set the environment variable `CHERRY_REGION_NAME` to the correct region where the cluster is running, e.g. `CHERRY_REGION_NAME="EU-Nord-1`
-1. If you want to run a loadbalancer, and it is not yet deployed, deploy it appropriately.
-1. Enable the loadbalancer by setting the environment variable `CHERRY_LOAD_BALANCER=metallb://`
-1. If you want to use a managed Floating IP for the control plane, create one using the Cherry Servers API or Web UI, tag it uniquely, and set the environment variable `CHERRY_FIP_TAG=<tag>`
-1. Run the command.
-
-There are multiple ways to run the command.
-
-In all cases, for lots of extra debugging, add `--v=2` or even higher levels, e.g. `--v=5`.
-
-### Docker
-
-```
-docker run --rm -e CHERRY_REGION_NAME=${CHERRY_REGION_NAME} -e CHERRY_LOAD_BALANCER=${CHERRY_LOAD_BALANCER} cherryservers/cloud-provider-cherry:latest --cloud-provider=cherryservers --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
-```
-
-### Go toolchain
-
-```
-CHERRY_REGION_NAME=${CHERRY_REGION_NAME} CHERRY_LOAD_BALANCER=${CHERRY_LOAD_BALANCER} go run . --cloud-provider=cherryservers --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
-```
-
-### Locally compiled binary
-
-```
-CHERRY_REGION_NAME=${CHERRY_REGION_NAME} CHERRY_LOAD_BALANCER=metallb:// dist/bin/cloud-provider-cherry-darwin-amd64 --cloud-provider=cherryservers --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
-```
-
-
+For information on how to build the CCM, as opposed to just using a released version,
+and how to run it locally for development, see [BUILD.md](./BUILD.md).
