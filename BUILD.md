@@ -1,11 +1,14 @@
 # CCM for Cherry Servers Build and Design
+
 The Cloud Controller Manager (CCM) Cherry Servers plugin enables a Kubernetes cluster to interface directly with
 Cherry Servers cloud services.
 
 ## Deploy
+
 Read how to deploy the Kubernetes CCM for Cherry Servers in the [README.md](./README.md)!
 
 ## Building
+
 To build the binary, run:
 
 ```
@@ -29,6 +32,7 @@ make build OS=linux ARCH=arm64
 ```
 
 ## Docker Image
+
 To build a docker image, run:
 
 ```
@@ -37,7 +41,44 @@ make image
 
 The image will be tagged with `:latest`
 
+## Running Locally
+
+You can run the CCM locally on your laptop or VM, i.e. not in the cluster. This _dramatically_ speeds up development. To do so:
+
+1. Deploy everything except for the `Deployment` and, optionally, the `Secret`
+1. Build it for your local platform `make build`
+1. Set the environment variable `CCM_SECRET` to a file with the secret contents as a json, i.e. the content of the secret's `stringData`, e.g. `CCM_SECRET=ccm-secret.yaml`
+1. Set the environment variable `KUBECONFIG` to a kubeconfig file with sufficient access to the cluster, e.g. `KUBECONFIG=mykubeconfig`
+1. Set the environment variable `CHERRY_REGION_NAME` to the correct region where the cluster is running, e.g. `CHERRY_REGION_NAME="EU-Nord-1`
+1. If you want to run a loadbalancer, and it is not yet deployed, deploy it appropriately.
+1. Enable the loadbalancer by setting the environment variable `CHERRY_LOAD_BALANCER=metallb://`
+1. If you want to use a managed Floating IP for the control plane, create one using the Cherry Servers API or Web UI, tag it uniquely, and set the environment variable `CHERRY_FIP_TAG=<tag>`
+1. Run the command.
+
+There are multiple ways to run the command.
+
+In all cases, for lots of extra debugging, add `--v=2` or even higher levels, e.g. `--v=5`.
+
+### Docker
+
+```
+docker run --rm -e CHERRY_REGION_NAME=${CHERRY_REGION_NAME} -e CHERRY_LOAD_BALANCER=${CHERRY_LOAD_BALANCER} cherryservers/cloud-provider-cherry:latest --cloud-provider=cherryservers --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
+```
+
+### Go toolchain
+
+```
+CHERRY_REGION_NAME=${CHERRY_REGION_NAME} CHERRY_LOAD_BALANCER=${CHERRY_LOAD_BALANCER} go run . --cloud-provider=cherryservers --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
+```
+
+### Locally compiled binary
+
+```
+CHERRY_REGION_NAME=${CHERRY_REGION_NAME} CHERRY_LOAD_BALANCER=metallb:// dist/bin/cloud-provider-cherry-darwin-amd64 --cloud-provider=cherryservers --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
+```
+
 ## CI/CD/Release pipeline
+
 The CI/CD/Release pipeline is run via the following steps:
 
 * `make ci`: builds the binary, runs all tests, builds the OCI image
@@ -145,3 +186,30 @@ To run any test:
 1. check the results, either as the return from the function under test, or as the modified data in the `backend`
 
 For examples, see [devices_test.go](./cherry/devices_test.go) or [facilities_test.go](./cherry/facilities_test.go).
+
+## Branches and Versioning
+
+The Cherry Servers CCM is similar to the standard Kubernetes versioning and branching model.
+
+* `main` is the main branch, and is the current development branch.
+* `vX.Y` is the release branch for a particular Kubernetes `major.minor` version, e.g. `v1.27`. This branch is created when the first work is done for a particular Kubernetes `major.minor` release, and is updated with any patches for that `major.minor` stream.
+
+`main` generally will be up to date with the most recent `vX.Y` branch, and will be the basis for the next `vX.Y+1` branch.
+
+### Creating a new version
+
+When a new Kubernetes `major.minor` version is released, create a new `vX.Y` branch from `main`.
+This branch is used for all patches to that `major.minor` version.
+
+### Patching a version
+
+When a new patch is required for a `vX.Y` branch, apply the fix to the HEAD of the specific branch.
+
+### Cutting a Release
+
+To cut a release, tag a commit on the branch. The tag should be of the form `vX.Y.Z`,
+e.g. `v1.27.0`. You should tag **only** on a commit in a branch whose name matches the
+`major.minor` of the tag.
+
+As of this writing, CI does not automatically verify that the tag matches the branch, so
+be careful with tagging.
