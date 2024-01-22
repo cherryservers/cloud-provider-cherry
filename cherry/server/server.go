@@ -56,7 +56,7 @@ func (c *CherryServer) CreateHandler() http.Handler {
 }
 
 // list all regions
-func (c *CherryServer) listRegionsHandler(w http.ResponseWriter, r *http.Request) {
+func (c *CherryServer) listRegionsHandler(w http.ResponseWriter, _ *http.Request) {
 	regions, err := c.Store.ListRegions()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -106,7 +106,7 @@ func (c *CherryServer) getRegionHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 // list all plans
-func (c *CherryServer) listPlansHandler(w http.ResponseWriter, r *http.Request) {
+func (c *CherryServer) listPlansHandler(w http.ResponseWriter, _ *http.Request) {
 	plans, err := c.Store.ListPlans()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

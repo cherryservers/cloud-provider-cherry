@@ -28,7 +28,7 @@ func newInstances(client *cherrygo.Client, projectID string) *instances {
 }
 
 // InstanceShutdown returns true if the node is shutdown in cloudprovider
-func (i *instances) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
+func (i *instances) InstanceShutdown(_ context.Context, node *v1.Node) (bool, error) {
 	klog.V(2).Infof("called InstanceShutdown for node %s with providerID %s", node.GetName(), node.Spec.ProviderID)
 	server, err := i.serverFromProviderID(node.Spec.ProviderID)
 	if err != nil {
@@ -39,7 +39,7 @@ func (i *instances) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, 
 }
 
 // InstanceExists returns true if the node exists in cloudprovider
-func (i *instances) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
+func (i *instances) InstanceExists(_ context.Context, node *v1.Node) (bool, error) {
 	klog.V(2).Infof("called InstanceExists for node %s with providerID %s", node.GetName(), node.Spec.ProviderID)
 	_, err := i.serverFromProviderID(node.Spec.ProviderID)
 
@@ -54,7 +54,7 @@ func (i *instances) InstanceExists(ctx context.Context, node *v1.Node) (bool, er
 }
 
 // InstanceMetadata returns instancemetadata for the node according to the cloudprovider
-func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
+func (i *instances) InstanceMetadata(_ context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
 	server, err := i.serverByNode(node)
 	if err != nil {
 		return nil, err

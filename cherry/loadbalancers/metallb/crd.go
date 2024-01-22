@@ -346,11 +346,13 @@ func (m *CRDConfigurer) updateOrDeletePeerByService(ctx context.Context, o metal
 	return false, nil
 }
 
-func (m *CRDConfigurer) Get(ctx context.Context) error { return nil }
+func (m *CRDConfigurer) Get(_ context.Context) error { return nil }
 
-func (m *CRDConfigurer) Update(ctx context.Context) error { return nil }
+func (m *CRDConfigurer) Update(_ context.Context) error { return nil }
 
 // RemoveAddressPooByAddress remove a pool by an address name. If the matching pool does not exist, do not change anything
+//
+//nolint:revive // ignore unused error
 func (m *CRDConfigurer) RemoveAddressPoolByAddress(ctx context.Context, addrName string) error {
 	return nil
 }
@@ -464,6 +466,9 @@ func convertToIPAddr(addr AddressPool, namespace, svcNamespace, svcName string) 
 	return ip
 }
 
+// convertToBGPPeer converts a Peer to a BGPPeer
+//
+//nolint:revive // ignore unused error
 func convertToBGPPeer(peer Peer, namespace, svc string) metalapi.BGPPeer {
 	time, _ := time.ParseDuration(peer.HoldTime)
 	bgpPeer := metalapi.BGPPeer{
@@ -506,12 +511,12 @@ func convertToNodeSelector(legacy NodeSelector) metalapi.NodeSelector {
 func convertToMatchExpressions(legacy []SelectorRequirements) []metalapi.MatchExpression {
 	matchExpressions := make([]metalapi.MatchExpression, 0)
 	for _, l := range legacy {
-		new := metalapi.MatchExpression{
+		expr := metalapi.MatchExpression{
 			Key:      l.Key,
 			Operator: l.Operator,
 			Values:   l.Values,
 		}
-		matchExpressions = append(matchExpressions, new)
+		matchExpressions = append(matchExpressions, expr)
 	}
 	return matchExpressions
 }

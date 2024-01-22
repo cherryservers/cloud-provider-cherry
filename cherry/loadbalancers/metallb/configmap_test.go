@@ -673,7 +673,6 @@ func TestSelectorRequirementsCompare(t *testing.T) {
 }
 
 // we do not test SelectorRequirements.Equal, as it is just .Compare() == 0
-
 func TestSelectorRequirementsSliceLen(t *testing.T) {
 	sl := []SelectorRequirements{
 		genSelectorRequirements(),
@@ -926,6 +925,8 @@ func TestPeerEqual(t *testing.T) {
 		t.Error("out-of-order NodeSelectors: not equal")
 	}
 }
+
+//nolint:revive // ignore unused t, as we intend to implement it in the future
 func TestPeerMatchSelector(t *testing.T) {
 
 }

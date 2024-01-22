@@ -57,7 +57,12 @@ type LB struct {
 	configurer Configurer
 }
 
-func NewLB(k8sclient kubernetes.Interface, config string) *LB {
+// NewLB returns a new LB
+// The first argument used to be k8sclient. We no longer need it, as we do client.New() in NewLB.
+// We keep it around in case it is needed in the future, e.g. if we need to go back to the configmap.
+// In theory, we should be able to get the client we need of type "sigs.k8s.io/controller-runtime/pkg/client"
+// from the k8sclient; for the future.
+func NewLB(_ kubernetes.Interface, config string) *LB {
 	var namespace, configmapname string
 	// it may have an extra slash at the beginning or end, so get rid of it
 	config = strings.TrimPrefix(config, "/")

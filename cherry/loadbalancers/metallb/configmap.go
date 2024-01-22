@@ -66,7 +66,7 @@ func (m *CMConfigurer) Update(ctx context.Context) error {
 	return err
 }
 
-func (m *CMConfigurer) UpdatePeersByService(ctx context.Context, adds *[]Peer, svcNamespace, svcName string) (bool, error) {
+func (m *CMConfigurer) UpdatePeersByService(_ context.Context, adds *[]Peer, svcNamespace, svcName string) (bool, error) {
 	var changed bool
 	for _, add := range *adds {
 		// go through the peers and see if we have one that matches
@@ -103,7 +103,7 @@ func (m *CMConfigurer) UpdatePeersByService(ctx context.Context, adds *[]Peer, s
 // For any peers that have this services in the special MatchLabel, remove
 // the service from the label. If there are no services left on a peer, remove the
 // peer entirely.
-func (m *CMConfigurer) RemovePeersByService(ctx context.Context, svcNamespace, svcName string) (bool, error) {
+func (m *CMConfigurer) RemovePeersByService(_ context.Context, svcNamespace, svcName string) (bool, error) {
 	var changed bool
 	// go through the peers and see if we have a match
 	peers := make([]Peer, 0)
@@ -126,7 +126,9 @@ func (m *CMConfigurer) RemovePeersByService(ctx context.Context, svcNamespace, s
 
 // AddAddressPool adds an address pool. If a matching pool already exists, do not change anything.
 // Returns if anything changed
-func (m *CMConfigurer) AddAddressPool(ctx context.Context, add *AddressPool, svcNamespace, svcName string) (bool, error) {
+//
+//nolint:revive // ignore unused error
+func (m *CMConfigurer) AddAddressPool(_ context.Context, add *AddressPool, svcNamespace, svcName string) (bool, error) {
 	// ignore empty pool; nothing to add
 	if add == nil {
 		return false, nil
@@ -166,7 +168,7 @@ func (m *CMConfigurer) AddAddressPool(ctx context.Context, add *AddressPool, svc
 }
 
 // RemoveAddressPooByAddress remove a pool by an address alone. If the matching pool does not exist, do not change anything
-func (m *CMConfigurer) RemoveAddressPoolByAddress(ctx context.Context, addr string) error {
+func (m *CMConfigurer) RemoveAddressPoolByAddress(_ context.Context, addr string) error {
 	if addr == "" {
 		return nil
 	}
@@ -189,4 +191,6 @@ func (m *CMConfigurer) RemoveAddressPoolByAddress(ctx context.Context, addr stri
 }
 
 // RemoveAddressPool remove a pool by name. If the matching pool does not exist, do not change anything
+//
+//nolint:revive // ignore unused error
 func (m *CMConfigurer) RemoveAddressPool(ctx context.Context, pool string) error { return nil }

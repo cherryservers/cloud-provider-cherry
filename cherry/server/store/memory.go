@@ -148,6 +148,9 @@ func (m *Memory) CreateServer(projectID int, name string, plan cherrygo.Plans, r
 		State:    "active",
 		Region:   region,
 		Plans:    plan,
+		Project: cherrygo.Project{
+			ID: projectID,
+		},
 	}
 	m.servers[server.ID] = server
 	return server, nil
@@ -172,6 +175,9 @@ func (m *Memory) ListServers(projectID int) ([]*cherrygo.Server, error) {
 	for _, v := range m.servers {
 		if len(servers) >= count {
 			break
+		}
+		if v.Project.ID != projectID {
+			continue
 		}
 		servers = append(servers, v)
 	}
@@ -217,6 +223,9 @@ func (m *Memory) GetProject(ID int) (*cherrygo.Project, error) {
 func (m *Memory) UpdateProject(ID int, project *cherrygo.Project) error {
 	if project == nil {
 		return fmt.Errorf("must include a valid project")
+	}
+	if ID != project.ID {
+		return fmt.Errorf("project ID mismatch")
 	}
 	if _, ok := m.projects[project.ID]; ok {
 		m.projects[project.ID] = project
