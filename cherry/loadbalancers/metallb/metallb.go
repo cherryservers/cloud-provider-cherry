@@ -2,16 +2,17 @@ package metallb
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/cherryservers/cloud-provider-cherry/cherry/loadbalancers"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
+	metalapi "go.universe.tf/metallb/api/v1beta1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
-	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 const (
@@ -22,47 +23,82 @@ const (
 	defaultName         = "config"
 )
 
-type LB struct {
-	configMapInterface typedv1.ConfigMapInterface
-	configMapNamespace string
-	configMapName      string
+type Configurer interface {
+	// AddPeerByService adds a peer for a specific service.
+	// If a matching peer already exists with the service, do not change anything.
+	// If a matching peer already exists but does not have the service, add it.
+	// Returns if anything changed.
+	UpdatePeersByService(ctx context.Context, adds *[]Peer, svcNamespace, svcName string) (bool, error)
+
+	// RemovePeersByService remove peers from a particular service.
+	// For any peers that have this services in the special MatchLabel, remove
+	// the service from the label. If there are no services left on a peer, remove the
+	// peer entirely. Not applicable with CRD
+	RemovePeersByService(ctx context.Context, svcNamespace, svcName string) (bool, error)
+
+	// AddAddressPool adds an address pool. If a matching pool already exists, do not change anything.
+	// Returns if anything changed
+	AddAddressPool(ctx context.Context, add *AddressPool, svcNamespace, svcName string) (bool, error)
+
+	// RemoveAddressPool remove a pool by name. If the matching pool does not exist, do not change anything
+	RemoveAddressPool(ctx context.Context, pool string) error
+
+	// RemoveAddressPoolByAddress remove a pool by an address alone. If the matching pool does not exist, do not change anything
+	RemoveAddressPoolByAddress(ctx context.Context, addr string) error
+
+	// Read the config from the system, if it needs to be updated
+	Get(context.Context) error
+
+	// Update write the config back to the system, if necessary
+	Update(context.Context) error
 }
 
-func NewLB(k8sclient kubernetes.Interface, config string) *LB {
-	var configmapnamespace, configmapname string
+type LB struct {
+	configurer Configurer
+}
+
+// NewLB returns a new LB
+// The first argument used to be k8sclient. We no longer need it, as we do client.New() in NewLB.
+// We keep it around in case it is needed in the future, e.g. if we need to go back to the configmap.
+// In theory, we should be able to get the client we need of type "sigs.k8s.io/controller-runtime/pkg/client"
+// from the k8sclient; for the future.
+func NewLB(_ kubernetes.Interface, config string) *LB {
+	var namespace, configmapname string
 	// it may have an extra slash at the beginning or end, so get rid of it
 	config = strings.TrimPrefix(config, "/")
 	config = strings.TrimSuffix(config, "/")
 	cmparts := strings.SplitN(config, "/", 2)
 	if len(cmparts) >= 2 {
-		configmapnamespace, configmapname = cmparts[0], cmparts[1]
+		namespace, configmapname = cmparts[0], cmparts[1]
 	}
 	// defaults
 	if configmapname == "" {
 		configmapname = defaultName
 	}
-	if configmapnamespace == "" {
-		configmapnamespace = defaultNamespace
+	if namespace == "" {
+		namespace = defaultNamespace
 	}
 
-	// get the configmap
-	cmInterface := k8sclient.CoreV1().ConfigMaps(configmapnamespace)
+	// get the CRD information
+	scheme := runtime.NewScheme()
+	_ = metalapi.AddToScheme(scheme)
+	cl, err := client.New(clientconfig.GetConfigOrDie(), client.Options{Scheme: scheme})
+	if err != nil {
+		panic(err)
+	}
 	return &LB{
-		configMapInterface: cmInterface,
-		configMapNamespace: configmapnamespace,
-		configMapName:      configmapname,
+		configurer: &CRDConfigurer{namespace: namespace, client: cl},
 	}
 }
 
 func (l *LB) AddService(ctx context.Context, svcNamespace, svcName, ip string, nodes []loadbalancers.Node) error {
-	config, err := l.getConfigMap(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to retrieve metallb config map %s:%s : %w", l.configMapNamespace, l.configMapName, err)
+	config := l.configurer
+	if err := config.Get(ctx); err != nil {
+		return fmt.Errorf("unable to add retrieve metallb config: %w", err)
 	}
 
-	// Update the service and configmap and save them
-	err = mapIP(ctx, config, ip, svcNamespace, svcName, l.configMapName, l.configMapInterface)
-	if err != nil {
+	// Update the service and configmap/IpAddressPool and save them
+	if err := mapIP(ctx, config, ip, svcNamespace, svcName); err != nil {
 		return fmt.Errorf("unable to map IP to service: %w", err)
 	}
 	if err := l.addNodes(ctx, svcNamespace, svcName, nodes); err != nil {
@@ -72,20 +108,26 @@ func (l *LB) AddService(ctx context.Context, svcNamespace, svcName, ip string, n
 }
 
 func (l *LB) RemoveService(ctx context.Context, svcNamespace, svcName, ip string) error {
-	config, err := l.getConfigMap(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to retrieve metallb config map %s:%s : %w", l.configMapNamespace, l.configMapName, err)
+	config := l.configurer
+	if err := config.Get(ctx); err != nil {
+		return fmt.Errorf("unable to retrieve metallb config: %w", err)
 	}
 
-	// unmap the EIP
-	if err := unmapIP(ctx, config, ip, l.configMapName, l.configMapInterface); err != nil {
+	// remove the EIP
+	if err := unmapIP(ctx, config, ip, svcNamespace, svcName); err != nil {
 		return fmt.Errorf("failed to remove IP: %w", err)
 	}
 
 	// remove any node entries for this service
 	// go through the peers and see if we have one with our hostname.
-	if config.RemovePeersByService(svcNamespace, svcName) {
-		return saveUpdatedConfigMap(ctx, l.configMapInterface, l.configMapName, config)
+	removed, err := config.RemovePeersByService(ctx, svcNamespace, svcName)
+	if err != nil {
+		return fmt.Errorf("unable to remove service: %w", err)
+	}
+	if removed {
+		if err := config.Update(ctx); err != nil {
+			return fmt.Errorf("unable to remove service: %w", err)
+		}
 	}
 	return nil
 }
@@ -102,19 +144,22 @@ func (l *LB) UpdateService(ctx context.Context, svcNamespace, svcName string, no
 
 // addNodes add one or more nodes with the provided name, srcIP, and bgp information
 func (l *LB) addNodes(ctx context.Context, svcNamespace, svcName string, nodes []loadbalancers.Node) error {
-	config, err := l.getConfigMap(ctx)
-	if err != nil {
-		return fmt.Errorf("unable to retrieve metallb config map %s:%s : %w", l.configMapNamespace, l.configMapName, err)
+	config := l.configurer
+	if err := config.Get(ctx); err != nil {
+		return fmt.Errorf("unable to get metallb config: %w", err)
 	}
 
-	var changed bool
+	var (
+		changed       bool
+		peersToUpdate []Peer
+	)
 	for _, node := range nodes {
 		ns := []NodeSelector{
 			{MatchLabels: map[string]string{
 				hostnameKey: node.Name,
 			}},
 		}
-		for _, peer := range node.Peers {
+		for i, peer := range node.Peers {
 			p := Peer{
 				MyASN:         uint32(node.LocalASN),
 				ASN:           uint32(node.PeerASN),
@@ -123,105 +168,75 @@ func (l *LB) addNodes(ctx context.Context, svcNamespace, svcName string, nodes [
 				Port:          uint16(peer.Port),
 				SrcAddr:       node.SourceIP,
 				NodeSelectors: ns,
+				Name:          fmt.Sprintf("%s-%d", node.Name, i),
 			}
-			if config.AddPeerByService(&p, svcNamespace, svcName) {
-				changed = true
-			}
+			peersToUpdate = append(peersToUpdate, p)
 		}
 	}
-	if changed {
-		return saveUpdatedConfigMap(ctx, l.configMapInterface, l.configMapName, config)
-	}
-	return nil
-}
-
-// RemoveNode remove a node with the provided name
-func (l *LB) RemoveNode(ctx context.Context, nodeName string) error {
-	config, err := l.getConfigMap(ctx)
+	// to ensure that the nodes are correct, we need to check the nodes specified
+	// for these services against the whole list of nodes/peers saved in the configuration
+	changed, err := config.UpdatePeersByService(ctx, &peersToUpdate, svcNamespace, svcName)
 	if err != nil {
-		return fmt.Errorf("unable to retrieve metallb config map %s:%s : %w", l.configMapNamespace, l.configMapName, err)
-	}
-	// go through the peers and see if we have one with our hostname.
-	selector := NodeSelector{
-		MatchLabels: map[string]string{
-			hostnameKey: nodeName,
-		},
-	}
-	var changed bool
-	if config.RemovePeersBySelector(&selector) {
-		changed = true
+		return fmt.Errorf("unable to update nodes: %w", err)
 	}
 	if changed {
-		return saveUpdatedConfigMap(ctx, l.configMapInterface, l.configMapName, config)
+		return config.Update(ctx)
 	}
 	return nil
-}
-
-func (l *LB) getConfigMap(ctx context.Context) (*ConfigFile, error) {
-	cm, err := l.configMapInterface.Get(ctx, l.configMapName, metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("unable to get metallb configmap %s: %w", l.configMapName, err)
-	}
-	// ignore checking if it exists; if not, it gives a blank string, which ParseConfig can handle anyways
-	configData := cm.Data["config"]
-	return ParseConfig([]byte(configData))
 }
 
 // mapIP add a given ip address to the metallb configmap
-func mapIP(ctx context.Context, config *ConfigFile, addr, svcNamespace, svcName, configmapname string, cmInterface typedv1.ConfigMapInterface) error {
+func mapIP(ctx context.Context, config Configurer, addr, svcNamespace, svcName string) error {
 	klog.V(2).Infof("mapping IP %s", addr)
-	return updateMapIP(ctx, config, addr, svcNamespace, svcName, configmapname, cmInterface, true)
+	return updateMapIP(ctx, config, addr, svcNamespace, svcName, true)
 }
 
 // unmapIP remove a given IP address from the metalllb config map
-func unmapIP(ctx context.Context, config *ConfigFile, addr, configmapname string, cmInterface typedv1.ConfigMapInterface) error {
+func unmapIP(ctx context.Context, config Configurer, addr, svcNamespace, svcName string) error {
 	klog.V(2).Infof("unmapping IP %s", addr)
-	return updateMapIP(ctx, config, addr, "", "", configmapname, cmInterface, false)
+	return updateMapIP(ctx, config, addr, svcNamespace, svcName, false)
 }
 
-func updateMapIP(ctx context.Context, config *ConfigFile, addr, svcNamespace, svcName, configmapname string, cmInterface typedv1.ConfigMapInterface, add bool) error {
+func updateMapIP(ctx context.Context, config Configurer, addr, svcNamespace, svcName string, add bool) error {
 	if config == nil {
 		klog.V(2).Info("config unchanged, not updating")
 		return nil
 	}
+	name := poolName(svcNamespace, svcName)
+
 	// update the configmap and save it
 	if add {
 		autoAssign := false
-		if !config.AddAddressPool(&AddressPool{
+		added, err := config.AddAddressPool(ctx, &AddressPool{
 			Protocol:   "bgp",
-			Name:       svcName,
+			Name:       name,
 			Addresses:  []string{addr},
 			AutoAssign: &autoAssign,
-		}) {
-			klog.V(2).Info("address already on ConfigMap, unchanged")
+		}, svcNamespace, svcName)
+		if err != nil {
+			klog.V(2).ErrorS(err, "error adding IP")
+			return fmt.Errorf("failed to add IP: %w", err)
+		}
+		if !added {
+			klog.V(2).Info("address already in config, unchanged")
 			return nil
 		}
 	} else {
-		config.RemoveAddressPoolByAddress(addr)
+		if err := config.RemoveAddressPool(ctx, name); err != nil {
+			klog.V(2).Infof("error removing IPAddressPool: %v", err)
+			return fmt.Errorf("error removing IPAddressPool: %w", err)
+		}
 	}
 	klog.V(2).Info("config changed, updating")
-	if err := saveUpdatedConfigMap(ctx, cmInterface, configmapname, config); err != nil {
-		klog.V(2).Infof("error updating configmap: %v", err)
-		return fmt.Errorf("failed to update configmap: %w", err)
+	if err := config.Update(ctx); err != nil {
+		klog.V(2).ErrorS(err, "error updating")
+		return fmt.Errorf("error updating: %w", err)
 	}
 	return nil
 }
 
-func saveUpdatedConfigMap(ctx context.Context, cmi typedv1.ConfigMapInterface, name string, cfg *ConfigFile) error {
-	b, err := cfg.Bytes()
-	if err != nil {
-		return fmt.Errorf("error converting configfile data to bytes: %w", err)
-	}
-
-	mergePatch, _ := json.Marshal(map[string]interface{}{
-		"data": map[string]interface{}{
-			"config": string(b),
-		},
-	})
-
-	klog.V(2).Infof("patching configmap:\n%s", mergePatch)
-	// save to k8s
-	_, err = cmi.Patch(ctx, name, k8stypes.MergePatchType, mergePatch, metav1.PatchOptions{})
-
-	return err
+func poolName(svcNamespace, svcName string) string {
+	ns := regexp.MustCompile(`[^a-zA-Z0-9-]+`).ReplaceAllString(svcNamespace, "")
+	svc := regexp.MustCompile(`[^a-zA-Z0-9-]+`).ReplaceAllString(svcName, "")
+	return fmt.Sprintf("%s.%s", ns, svc)
 }

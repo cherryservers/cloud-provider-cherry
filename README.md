@@ -321,7 +321,7 @@ If `kube-vip` management is enabled, then CCM does the following.
 
 ##### MetalLB
 
-**Minimum Version**: MetalLB [version 0.11.0](https://metallb.universe.tf/release-notes/#version-0-11-0)
+**Minimum Version**: MetalLB [version 0.13.2](https://metallb.universe.tf/release-notes/#version-0-13-2)
 
 When [MetalLB](https://metallb.universe.tf) is enabled, for user-deployed Kubernetes `Service` of `type=LoadBalancer`,
 the Cherry Servers CCM uses BGP to provide the _equivalence_ of load balancing, without
@@ -331,42 +331,42 @@ to route traffic for your services at the Floating IP to the correct host.
 To enable it, set the configuration `CHERRY_LOAD_BALANCER` or config `loadbalancer` to:
 
 ```
-metallb:///<configMapNamespace>/<configMapName>
+metallb:///<metalNamespace>/
 ```
 
 For example:
 
-* `metallb:///metallb-system/config` - enable `MetalLB` management and update the configmap `config` in the namespace `metallb-system`
-* `metallb:///foonamespace/myconfig` -  - enable `MetalLB` management and update the configmap `myconfig` in the namespace `foonamespae`
-* `metallb:///` - enable `MetalLB` management and update the default configmap, i.e. `config` in the namespace `metallb-system`
+* `metallb:///metallb-system/` - enable `MetalLB` management and update of the CRDs in the namespace `metallb-system`
+* `metallb:///foonamespace/` -  - enable `MetalLB` management and update of the CRDs in the namespace `foonamespae`
+* `metallb:///` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`
 
-Notice the **three* slashes. In the URL, the namespace and the configmap are in the path.
+Notice the **three* slashes. In the URL, the namespace is in the path.
 
-When enabled, CCM controls the loadbalancer by updating the provided `ConfigMap`.
+**Note:** This CCM no longer supports the pre-0.13.2 version of MetalLB with configmaps. If you are using configmaps, MetalLB provides a tool to convert them to CRDs. See the [MetalLB documentation](https://metallb.universe.tf/#backward-compatibility) for more information.
+
+When enabled, CCM controls the loadbalancer by updating the CRDs.
 
 If `MetalLB` management is enabled, then CCM does the following.
 
-1. Get the appropriate namespace and name of the `ConfigMap`, based on the rules above.
-2. If the `ConfigMap` does not exist, do the rest of the behaviours, but do not update the `ConfigMap`
-3. Enable BGP on the Cherry Servers project
-4. For each node currently in the cluster or added:
+1. Get the appropriate namespace, based on the rules above.
+1. Enable BGP on the Cherry Servers project
+1. For each node currently in the cluster or added:
    * retrieve the node's Cherry Server ID via the node provider ID
    * retrieve the device's BGP configuration: node ASN, peer ASN, peer IPs, source IP
-   * add them to the metallb `ConfigMap` with a kubernetes selector ensuring that the peer is only for this node
-5. For each node deleted from the cluster:
-   * remove the node from the MetalLB `ConfigMap`
-6. For each service of `type=LoadBalancer` currently in the cluster or added:
+   * add them to the metallb CRDs with a kubernetes selector ensuring that the peer is only for this node
+1. For each node deleted from the cluster:
+   * remove the node from the MetalLB CRDs
+1. For each service of `type=LoadBalancer` currently in the cluster or added:
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
-   * if a Floating IP address reservation with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core) and ensure it is in the pools of the MetalLB `ConfigMap` with `auto-assign: false`
-   * if a Floating IP address reservation with the appropriate tags does not exist, create it and add it to the services spec, and ensure it is in the pools of the MetalLB `ConfigMap` with `auto-assign: false`
-7. For each service of `type=LoadBalancer` deleted from the cluster:
+   * if a Floating IP address reservation with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core) and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`
+   * if a Floating IP address reservation with the appropriate tags does not exist, create it and add it to the services spec, and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`
+1. For each service of `type=LoadBalancer` deleted from the cluster:
    * find the Floating IP address from the service spec and remove it
-   * remove the IP from the `ConfigMap`
+   * remove the IP from the CRDs
    * delete the Floating IP reservation from Cherry Servers
 
-CCM itself does **not** deploy the load-balancer or any part of it, including the `ConfigMap`. It only
-modifies an existing `ConfigMap`. This can be deployed by the administrator separately, using the manifest
-provided in the releases page, or in any other manner.
+CCM itself does **not** deploy the load-balancer or any part of it. This can be deployed by the
+administrator separately, using the manifest provided in the releases page, or in any other manner.
 
 ##### empty
 

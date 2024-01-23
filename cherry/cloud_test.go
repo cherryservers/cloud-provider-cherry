@@ -29,15 +29,22 @@ const (
 type mockControllerClientBuilder struct {
 }
 
+//nolint:revive // ignore unused error
 func (m mockControllerClientBuilder) Config(name string) (*restclient.Config, error) {
 	return &restclient.Config{}, nil
 }
+
+//nolint:revive // ignore unused error
 func (m mockControllerClientBuilder) ConfigOrDie(name string) *restclient.Config {
 	return &restclient.Config{}
 }
+
+//nolint:revive // ignore unused error
 func (m mockControllerClientBuilder) Client(name string) (clientset.Interface, error) {
 	return k8sfake.NewSimpleClientset(), nil
 }
+
+//nolint:revive // ignore unused error
 func (m mockControllerClientBuilder) ClientOrDie(name string) clientset.Interface {
 	return k8sfake.NewSimpleClientset()
 }

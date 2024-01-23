@@ -29,7 +29,6 @@ func testNode(providerID, nodeName string) *v1.Node {
 
 func TestNodeAddresses(t *testing.T) {
 	vc, backend := testGetValidCloud(t, "")
-	project, _ := backend.CreateProject(projectName, false)
 	inst, _ := vc.InstancesV2()
 	if inst == nil {
 		t.Fatal("inst is nil")
@@ -37,7 +36,7 @@ func TestNodeAddresses(t *testing.T) {
 	serverName := testGetNewServerName()
 	region, _ := testGetOrCreateValidRegion(validRegionName, validRegionCode, backend)
 	plan, _ := testGetOrCreateValidPlan(validPlanName, backend)
-	server, _ := backend.CreateServer(project.ID, serverName, *plan, *region)
+	server, _ := backend.CreateServer(vc.config.ProjectID, serverName, *plan, *region)
 	// update the addresses on the device; normally created by Cherry Servers as part of device provisioning
 	server.IPAddresses = []cherrygo.IPAddresses{
 		testCreateAddress(false, false), // private ipv4

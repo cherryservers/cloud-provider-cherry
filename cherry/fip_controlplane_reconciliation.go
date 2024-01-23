@@ -246,7 +246,7 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 	return m, nil
 }
 
-func (m *controlPlaneEndpointManager) reassign(ctx context.Context, nodes []*v1.Node, ip *cherrygo.IPAddresses, fipURL string) error {
+func (m *controlPlaneEndpointManager) reassign(_ context.Context, nodes []*v1.Node, ip *cherrygo.IPAddresses, fipURL string) error {
 	klog.V(2).Info("controlPlaneEndpoint.reassign")
 	// must have figured out the node port first, or nothing to do
 	if m.nodeAPIServerPort == 0 {
@@ -324,7 +324,7 @@ func (m *controlPlaneEndpointManager) getControlPlaneEndpointReservation() (*che
 }
 
 // nodeIsAssigned determine if the cherrgo.IPAddresses is assigned to the server represented by the Kubernetes v1.Node
-func (m *controlPlaneEndpointManager) nodeIsAssigned(ctx context.Context, node *v1.Node, ipReservation *cherrygo.IPAddresses) (bool, error) {
+func (m *controlPlaneEndpointManager) nodeIsAssigned(_ context.Context, node *v1.Node, ipReservation *cherrygo.IPAddresses) (bool, error) {
 	for _, na := range node.Status.Addresses {
 		if na.Address == ipReservation.Address {
 			return true, nil

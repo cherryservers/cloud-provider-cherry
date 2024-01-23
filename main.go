@@ -40,7 +40,7 @@ func main() {
 	pflag.CommandLine.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
 	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 
-	command := app.NewCloudControllerManagerCommand(opts, cloudInitializer, controllerInitializers, fss, wait.NeverStop)
+	command := app.NewCloudControllerManagerCommand(opts, cloudInitializer, controllerInitializers, nil, fss, wait.NeverStop)
 
 	logs.InitLogs()
 	defer logs.FlushLogs()

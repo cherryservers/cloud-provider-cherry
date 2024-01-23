@@ -99,7 +99,7 @@ func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, p
 // if so, what its status is.
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (l *loadBalancers) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
+func (l *loadBalancers) GetLoadBalancer(_ context.Context, _ string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
 	svcName := serviceRep(service)
 	svcTag, svcValue := serviceTag(service)
 	clsTag, clsValue := clusterTag(l.clusterID)
@@ -137,7 +137,7 @@ func (l *loadBalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 
 // GetLoadBalancerName returns the name of the load balancer. Implementations must treat the
 // *v1.Service parameter as read-only and not modify it.
-func (l *loadBalancers) GetLoadBalancerName(ctx context.Context, clusterName string, service *v1.Service) string {
+func (l *loadBalancers) GetLoadBalancerName(_ context.Context, _ string, service *v1.Service) string {
 	svcTag, svcValue := serviceTag(service)
 	clsTag, clsValue := clusterTag(l.clusterID)
 	return fmt.Sprintf("%s=%s:%s=%s:%s=%s", cherryTag, cherryValue, svcTag, svcValue, clsTag, clsValue)
@@ -147,7 +147,7 @@ func (l *loadBalancers) GetLoadBalancerName(ctx context.Context, clusterName str
 // Implementations must treat the *v1.Service and *v1.Node
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName string, service *v1.Service, nodes []*v1.Node) (*v1.LoadBalancerStatus, error) {
+func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, _ string, service *v1.Service, nodes []*v1.Node) (*v1.LoadBalancerStatus, error) {
 	klog.V(2).Infof("EnsureLoadBalancer(): add: service %s/%s", service.Namespace, service.Name)
 	// get IP address reservations and check if they any exists for this svc
 	ips, _, err := l.client.IPAddresses.List(l.project)
@@ -172,7 +172,7 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 // Implementations must treat the *v1.Service and *v1.Node
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, clusterName string, service *v1.Service, nodes []*v1.Node) error {
+func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, _ string, service *v1.Service, nodes []*v1.Node) error {
 	klog.V(2).Infof("UpdateLoadBalancer(): service %s", service.Name)
 	// get IP address reservations and check if they any exists for this svc
 
@@ -187,7 +187,7 @@ func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, clusterName stri
 		// ensure BGP is enabled for the node, and get its config
 		bgpConfig, err := l.bgpEnabler.ensureNodeBGPEnabled(id)
 		if err != nil {
-			klog.Errorf("could not ensure BGP enabled for node %s: %w", node.Name, err)
+			klog.Errorf("could not ensure BGP enabled for node %s: %v", node.Name, err)
 			continue
 		}
 		klog.V(2).Infof("bgp enabled on node %s", node.Name)
@@ -217,7 +217,7 @@ func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, clusterName stri
 // doesn't exist even if some part of it is still laying around.
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
-func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *v1.Service) error {
+func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, _ string, service *v1.Service) error {
 	// REMOVAL
 	klog.V(2).Infof("EnsureLoadBalancerDeleted(): remove: %s", service.Name)
 	svcName := serviceRep(service)
@@ -422,13 +422,13 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 		// ensure BGP is enabled for the node
 		bgpConfig, err := l.bgpEnabler.ensureNodeBGPEnabled(id)
 		if err != nil {
-			klog.Errorf("could not ensure BGP enabled for node %s: %w", node.Name, err)
+			klog.Errorf("could not ensure BGP enabled for node %s: %v", node.Name, err)
 			continue
 		}
 		klog.V(2).Infof("bgp enabled on node %s", node.Name)
 		// ensure the node has the correct annotations
 		if err := l.annotateNode(ctx, node); err != nil {
-			klog.Errorf("failed to annotate node %s: %w", node.Name, err)
+			klog.Errorf("failed to annotate node %s: %v", node.Name, err)
 			continue
 		}
 		var peers []loadbalancers.Peer
