@@ -62,7 +62,7 @@ func TestNodeAddresses(t *testing.T) {
 	}{
 		{"empty node name", testNode("", ""), nil, fmt.Errorf("node name cannot be empty")},
 		{"empty ID", testNode("", nodeName), nil, cloudprovider.InstanceNotFound},
-		{"invalid id", testNode("cherryservers://abc123", nodeName), nil, fmt.Errorf("Error: Error response from API: invalid server ID: abc123")},
+		{"invalid id", testNode("cherryservers://abc123", nodeName), nil, fmt.Errorf("error converting")},
 		{"unknown id", testNode(fmt.Sprintf("cherryservers://%d", randomID), nodeName), nil, cloudprovider.InstanceNotFound},
 		{"valid both", testNode(fmt.Sprintf("cherryservers://%d", server.ID), serverName), validAddresses, nil},
 		{"valid provider id", testNode(fmt.Sprintf("cherryservers://%d", server.ID), nodeName), validAddresses, nil},
@@ -165,7 +165,7 @@ func TestInstanceType(t *testing.T) {
 		err      error
 	}{
 		{"empty name", "", "", cloudprovider.InstanceNotFound},
-		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("Error: Error response from API: invalid server ID: thisdoesnotexist")},
+		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("error converting")},
 		{"unknown name", fmt.Sprintf("%d", randomID), "", cloudprovider.InstanceNotFound},
 		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), fmt.Sprintf("%d-%s", server.Plan.ID, server.Plan.Name), nil},
 	}
@@ -209,7 +209,7 @@ func TestInstanceZone(t *testing.T) {
 		err      error
 	}{
 		{"empty name", "", "", cloudprovider.InstanceNotFound},
-		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("Error: Error response from API: invalid server ID")},
+		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("error converting")},
 		{"unknown name", fmt.Sprintf("%d", randomID), "", cloudprovider.InstanceNotFound},
 		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), server.Region.Name, nil},
 	}
