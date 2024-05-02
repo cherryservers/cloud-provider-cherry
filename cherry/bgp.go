@@ -3,7 +3,7 @@ package cherry
 import (
 	"fmt"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
@@ -21,13 +21,13 @@ type NodeBGPInfo struct {
 }
 
 type bgp struct {
-	project   string
+	project   int
 	client    *cherrygo.Client
 	k8sclient kubernetes.Interface
 	localASN  int
 }
 
-func newBGP(client *cherrygo.Client, k8sclient kubernetes.Interface, project string) (*bgp, error) {
+func newBGP(client *cherrygo.Client, k8sclient kubernetes.Interface, project int) (*bgp, error) {
 
 	b := &bgp{
 		client:    client,
@@ -37,7 +37,7 @@ func newBGP(client *cherrygo.Client, k8sclient kubernetes.Interface, project str
 	// enable BGP
 	klog.V(2).Info("bgp.init(): enabling BGP on project")
 	if err := b.enableBGP(); err != nil {
-		return nil, fmt.Errorf("failed to enable BGP on project %s: %w", b.project, err)
+		return nil, fmt.Errorf("failed to enable BGP on project %d: %w", b.project, err)
 	}
 	klog.V(2).Info("bgp.init(): BGP enabled")
 	return b, nil
@@ -46,9 +46,9 @@ func newBGP(client *cherrygo.Client, k8sclient kubernetes.Interface, project str
 // enableBGP enable bgp on the project
 func (b *bgp) enableBGP() error {
 	// first check if it is enabled before trying to create it
-	project, _, err := b.client.Project.List(b.project)
+	project, _, err := b.client.Projects.Get(b.project, nil)
 	if err != nil {
-		return fmt.Errorf("error getting project %s: %v", b.project, err)
+		return fmt.Errorf("error getting project %d: %v", b.project, err)
 	}
 	// already configured? just return nil
 	if project.Bgp.Enabled {
@@ -57,9 +57,11 @@ func (b *bgp) enableBGP() error {
 	}
 
 	// enable it
-	project, _, err = b.client.Project.Update(b.project, &cherrygo.UpdateProject{
-		Name: project.Name,
-		Bgp:  true,
+	name := project.Name
+	bgp := true
+	project, _, err = b.client.Projects.Update(b.project, &cherrygo.UpdateProject{
+		Name: &name,
+		Bgp:  &bgp,
 	})
 	if err != nil {
 		return err
@@ -69,17 +71,17 @@ func (b *bgp) enableBGP() error {
 }
 
 // ensureNodeBGPEnabled check if the node has bgp enabled, and set it if it does not
-func (b *bgp) ensureNodeBGPEnabled(id string) (NodeBGPInfo, error) {
+func (b *bgp) ensureNodeBGPEnabled(providerID string) (NodeBGPInfo, error) {
 	// if we are running ccm properly, then the provider ID will be on the node object
-	id, err := serverIDFromProviderID(id)
+	id, err := serverIDFromProviderID(providerID)
 	if err != nil {
 		return NodeBGPInfo{}, err
 	}
 
 	// first check if it is enabled before trying to create it
-	server, _, err := b.client.Server.List(id, nil)
+	server, _, err := b.client.Servers.Get(id, nil)
 	if err != nil {
-		return NodeBGPInfo{}, fmt.Errorf("error getting server %s: %v", id, err)
+		return NodeBGPInfo{}, fmt.Errorf("error getting server %d: %v", id, err)
 	}
 	// already configured? just return nil
 	if server.BGP.Enabled {
@@ -92,7 +94,7 @@ func (b *bgp) ensureNodeBGPEnabled(id string) (NodeBGPInfo, error) {
 	}
 
 	// enable it
-	server, _, err = b.client.Server.Update(id, &cherrygo.UpdateServer{
+	server, _, err = b.client.Servers.Update(id, &cherrygo.UpdateServer{
 		Tags: &server.Tags,
 		Bgp:  true,
 	})

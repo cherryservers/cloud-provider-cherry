@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 	cherryServer "github.com/cherryservers/cloud-provider-cherry/cherry/server"
 	"github.com/cherryservers/cloud-provider-cherry/cherry/server/store"
 	retryablehttp "github.com/hashicorp/go-retryablehttp"

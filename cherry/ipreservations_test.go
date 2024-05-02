@@ -3,16 +3,16 @@ package cherry
 import (
 	"testing"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 )
 
 func TestIPReservationByAllTags(t *testing.T) {
-	ips := []cherrygo.IPAddresses{
-		{Tags: map[string]string{"a": "1", "b": "2"}},
-		{Tags: map[string]string{"c": "3", "d": "4"}},
-		{Tags: map[string]string{"a": "1", "d": "4"}},
-		{Tags: map[string]string{"b": "2", "c": "3"}},
-		{Tags: map[string]string{"b": "2", "q": "10"}},
+	ips := []cherrygo.IPAddress{
+		{Tags: &map[string]string{"a": "1", "b": "2"}},
+		{Tags: &map[string]string{"c": "3", "d": "4"}},
+		{Tags: &map[string]string{"a": "1", "d": "4"}},
+		{Tags: &map[string]string{"b": "2", "c": "3"}},
+		{Tags: &map[string]string{"b": "2", "q": "10"}},
 	}
 	tests := []struct {
 		tags  map[string]string

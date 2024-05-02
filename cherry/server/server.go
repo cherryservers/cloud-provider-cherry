@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 	"github.com/cherryservers/cloud-provider-cherry/cherry/server/store"
 	"github.com/gorilla/mux"
 )
@@ -114,7 +114,7 @@ func (c *CherryServer) listPlansHandler(w http.ResponseWriter, _ *http.Request) 
 		return
 	}
 	var resp = struct {
-		plans []*cherrygo.Plans
+		plans []*cherrygo.Plan
 	}{
 		plans: plans,
 	}
@@ -143,7 +143,7 @@ func (c *CherryServer) getPlanHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var resp = struct {
-		plan cherrygo.Plans
+		plan cherrygo.Plan
 	}{
 		plan: *plan,
 	}
@@ -232,10 +232,10 @@ func (c *CherryServer) createServerHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// interpret the planID and see if it is a valid one
-	planID, err := strconv.ParseInt(req.PlanID, 10, 32)
+	planID, err := strconv.ParseInt(req.Plan, 10, 32)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(ErrorResponse{Code: http.StatusBadRequest, Message: fmt.Sprintf("invalid plan ID: %s", req.PlanID)})
+		_ = json.NewEncoder(w).Encode(ErrorResponse{Code: http.StatusBadRequest, Message: fmt.Sprintf("invalid plan ID: %s", req.Plan)})
 		return
 	}
 	plan, err := c.Store.GetPlan(int(planID))
@@ -367,9 +367,13 @@ func (c *CherryServer) updateProjectHandler(w http.ResponseWriter, r *http.Reque
 		_ = json.NewEncoder(w).Encode(ErrorResponse{Code: http.StatusNotFound, Message: "project ID not found"})
 		return
 	}
-	project.Bgp.Enabled = req.Bgp
-	if req.Name != "" {
-		project.Name = req.Name
+	var bgp bool
+	if req.Bgp != nil {
+		bgp = *req.Bgp
+	}
+	project.Bgp.Enabled = bgp
+	if req.Name != nil {
+		project.Name = *req.Name
 	}
 	if err := c.Store.UpdateProject(int(projectID), project); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

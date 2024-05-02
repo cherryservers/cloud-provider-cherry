@@ -21,6 +21,8 @@ github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj
 github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cherryservers/cherrygo v0.0.0-20220401075457-717ec4d9cb01 h1:j7SqlbefPyse+nYg1SdbvxKRIcHiNAkDDRngN5ndLsM=
 github.com/cherryservers/cherrygo v0.0.0-20220401075457-717ec4d9cb01/go.mod h1:EhhDQz0V8WtBLu/xhboTnuenN6snuOxMfOsSGljB7es=
+github.com/cherryservers/cherrygo/v3 v3.2.0 h1:mASFq9n6jXNHZ/iuMVNeKMvGIY02sFq0MPlK6SJ5OS0=
+github.com/cherryservers/cherrygo/v3 v3.2.0/go.mod h1:ubyz7yqr8CaC6k7RSzkI2P6tNXk094BOADodGejEcLQ=
 github.com/cncf/xds/go v0.0.0-20230607035331-e9ce68804cb4 h1:/inchEIKaYC1Akx+H+gqO04wryn5h75LSazbRlnya1k=
 github.com/cncf/xds/go v0.0.0-20230607035331-e9ce68804cb4/go.mod h1:eXthEFrGJvWHgFFCl3hGmgk+/aYT6PnTQLykKQRLhEs=
 github.com/coreos/go-semver v0.3.1 h1:yi21YpKnrx1gt5R+la8n5WgS0kCrsPp33dmEyHReZr4=
