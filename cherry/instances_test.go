@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	cloudprovider "k8s.io/cloud-provider"
@@ -38,7 +38,7 @@ func TestNodeAddresses(t *testing.T) {
 	plan, _ := testGetOrCreateValidPlan(validPlanName, backend)
 	server, _ := backend.CreateServer(vc.config.ProjectID, serverName, *plan, *region)
 	// update the addresses on the device; normally created by Cherry Servers as part of device provisioning
-	server.IPAddresses = []cherrygo.IPAddresses{
+	server.IPAddresses = []cherrygo.IPAddress{
 		testCreateAddress(false, false), // private ipv4
 		testCreateAddress(false, true),  // public ipv4
 		testCreateAddress(true, true),   // public ipv6
@@ -62,7 +62,7 @@ func TestNodeAddresses(t *testing.T) {
 	}{
 		{"empty node name", testNode("", ""), nil, fmt.Errorf("node name cannot be empty")},
 		{"empty ID", testNode("", nodeName), nil, cloudprovider.InstanceNotFound},
-		{"invalid id", testNode("cherryservers://abc123", nodeName), nil, fmt.Errorf("Error: Error response from API: invalid server ID: abc123")},
+		{"invalid id", testNode("cherryservers://abc123", nodeName), nil, fmt.Errorf("error converting")},
 		{"unknown id", testNode(fmt.Sprintf("cherryservers://%d", randomID), nodeName), nil, cloudprovider.InstanceNotFound},
 		{"valid both", testNode(fmt.Sprintf("cherryservers://%d", server.ID), serverName), validAddresses, nil},
 		{"valid provider id", testNode(fmt.Sprintf("cherryservers://%d", server.ID), nodeName), validAddresses, nil},
@@ -95,7 +95,7 @@ func TestNodeAddressesByProviderID(t *testing.T) {
 	plan, _ := testGetOrCreateValidPlan(validPlanName, backend)
 	server, _ := backend.CreateServer(project.ID, serverName, *plan, *region)
 	// update the addresses on the device; normally created by Cherry Servers as part of provisioning
-	server.IPAddresses = []cherrygo.IPAddresses{
+	server.IPAddresses = []cherrygo.IPAddress{
 		testCreateAddress(false, false), // private ipv4
 		testCreateAddress(false, true),  // public ipv4
 		testCreateAddress(true, true),   // public ipv6
@@ -153,7 +153,7 @@ func TestInstanceType(t *testing.T) {
 	server, _ := backend.CreateServer(project.ID, serverName, *plan, *region)
 	privateIP := "10.1.1.2"
 	publicIP := "25.50.75.100"
-	server.IPAddresses = append(server.IPAddresses, []cherrygo.IPAddresses{
+	server.IPAddresses = append(server.IPAddresses, []cherrygo.IPAddress{
 		{Address: privateIP, Type: "private-ip", AddressFamily: 4},
 		{Address: publicIP, Type: "primary-ip", AddressFamily: 4},
 	}...)
@@ -165,9 +165,9 @@ func TestInstanceType(t *testing.T) {
 		err      error
 	}{
 		{"empty name", "", "", cloudprovider.InstanceNotFound},
-		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("Error: Error response from API: invalid server ID: thisdoesnotexist")},
+		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("error converting")},
 		{"unknown name", fmt.Sprintf("%d", randomID), "", cloudprovider.InstanceNotFound},
-		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), fmt.Sprintf("%d-%s", server.Plans.ID, server.Plans.Name), nil},
+		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), fmt.Sprintf("%d-%s", server.Plan.ID, server.Plan.Name), nil},
 	}
 
 	for i, tt := range tests {
@@ -197,7 +197,7 @@ func TestInstanceZone(t *testing.T) {
 	server, _ := backend.CreateServer(project.ID, devName, *plan, *region)
 	privateIP := "10.1.1.2"
 	publicIP := "25.50.75.100"
-	server.IPAddresses = append(server.IPAddresses, []cherrygo.IPAddresses{
+	server.IPAddresses = append(server.IPAddresses, []cherrygo.IPAddress{
 		{Address: privateIP, Type: "private-ip", AddressFamily: 4},
 		{Address: publicIP, Type: "primary-ip", AddressFamily: 4},
 	}...)
@@ -209,7 +209,7 @@ func TestInstanceZone(t *testing.T) {
 		err      error
 	}{
 		{"empty name", "", "", cloudprovider.InstanceNotFound},
-		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("Error: Error response from API: invalid server ID")},
+		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("error converting")},
 		{"unknown name", fmt.Sprintf("%d", randomID), "", cloudprovider.InstanceNotFound},
 		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), server.Region.Name, nil},
 	}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/component-base/version"
 	"k8s.io/klog/v2"
@@ -79,23 +79,23 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 	clientset := clientBuilder.ClientOrDie("cloud-provider-cherry-shared-informers")
 
 	// initialize the individual services
-	projectIDString := fmt.Sprintf("%d", c.config.ProjectID)
-	epm, err := newControlPlaneEndpointManager(clientset, stop, c.config.FIPTag, projectIDString, c.client, c.config.APIServerPort, c.config.FIPHealthCheckUseHostIP)
+	projectID := c.config.ProjectID
+	epm, err := newControlPlaneEndpointManager(clientset, stop, c.config.FIPTag, projectID, c.client, c.config.APIServerPort, c.config.FIPHealthCheckUseHostIP)
 	if err != nil {
 		klog.Fatalf("could not initialize ControlPlaneEndpointManager: %v", err)
 	}
-	bgp, err := newBGP(c.client, clientset, projectIDString)
+	bgp, err := newBGP(c.client, clientset, projectID)
 	if err != nil {
 		klog.Fatalf("could not initialize BGP: %v", err)
 	}
-	lb, err := newLoadBalancers(c.client, clientset, projectIDString, c.config.Region, c.config.LoadBalancerSetting, c.config.AnnotationLocalASN, c.config.AnnotationPeerASN, c.config.AnnotationPeerIP, c.config.AnnotationSrcIP, c.config.AnnotationFIPRegion, c.config.BGPNodeSelector, bgp)
+	lb, err := newLoadBalancers(c.client, clientset, projectID, c.config.Region, c.config.LoadBalancerSetting, c.config.AnnotationLocalASN, c.config.AnnotationPeerASN, c.config.AnnotationPeerIP, c.config.AnnotationSrcIP, c.config.AnnotationFIPRegion, c.config.BGPNodeSelector, bgp)
 	if err != nil {
 		klog.Fatalf("could not initialize LoadBalancers: %v", err)
 	}
 
 	c.loadBalancer = lb
 	c.bgp = bgp
-	c.instances = newInstances(c.client, projectIDString)
+	c.instances = newInstances(c.client, projectID)
 	c.controlPlaneEndpointManager = epm
 
 	klog.Info("Initialize of cloud provider complete")

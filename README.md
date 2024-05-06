@@ -302,7 +302,7 @@ To enable it, set the configuration `CHERRY_LOAD_BALANCER` or config `loadbalanc
 kube-vip://
 ```
 
-Directions on using configuring kube-vip in this method are available at the kube-vip [site](https://kube-vip.chipzoller.dev/docs/installation/daemonset/)
+Directions on using configuring kube-vip in this method are available at the kube-vip [site](https://kube-vip.io/docs/)
 
 If `kube-vip` management is enabled, then CCM does the following.
 

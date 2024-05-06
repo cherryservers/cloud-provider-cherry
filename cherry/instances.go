@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -16,14 +17,14 @@ import (
 
 type instances struct {
 	client  *cherrygo.Client
-	project string
+	project int
 }
 
 var (
 	_ cloudprovider.InstancesV2 = (*instances)(nil)
 )
 
-func newInstances(client *cherrygo.Client, projectID string) *instances {
+func newInstances(client *cherrygo.Client, projectID int) *instances {
 	return &instances{client: client, project: projectID}
 }
 
@@ -72,7 +73,7 @@ func (i *instances) InstanceMetadata(_ context.Context, node *v1.Node) (*cloudpr
 	//		must be 63 characters or less (can be empty),
 	//		unless empty, must begin and end with an alphanumeric character ([a-z0-9A-Z]),
 	//		could contain dashes (-), underscores (_), dots (.), and alphanumerics between.
-	p = fmt.Sprintf("%d-%s", server.Plans.ID, strings.ReplaceAll(server.Plans.Name, " ", "-"))
+	p = fmt.Sprintf("%d-%s", server.Plan.ID, strings.ReplaceAll(server.Plan.Name, " ", "-"))
 
 	// "A zone represents a logical failure domain"
 	// "A region represents a larger domain, made up of one or more zones"
@@ -129,9 +130,9 @@ func (i *instances) serverByNode(node *v1.Node) (*cherrygo.Server, error) {
 	return serverByName(i.client, i.project, types.NodeName(node.GetName()))
 }
 
-func serverByID(client *cherrygo.Client, id string) (*cherrygo.Server, error) {
-	klog.V(2).Infof("called serverByID with ID %s", id)
-	server, resp, err := client.Server.List(id, nil)
+func serverByID(client *cherrygo.Client, id int) (*cherrygo.Server, error) {
+	klog.V(2).Infof("called serverByID with ID %d", id)
+	server, resp, err := client.Servers.Get(id, nil)
 	if resp.StatusCode == 404 {
 		return nil, cloudprovider.InstanceNotFound
 	}
@@ -142,14 +143,14 @@ func serverByID(client *cherrygo.Client, id string) (*cherrygo.Server, error) {
 }
 
 // serverByName returns an instance whose hostname matches the kubernetes node.Name
-func serverByName(client *cherrygo.Client, projectID string, nodeName types.NodeName) (*cherrygo.Server, error) {
-	klog.V(2).Infof("called serverByName with projectID %s nodeName %s", projectID, nodeName)
+func serverByName(client *cherrygo.Client, projectID int, nodeName types.NodeName) (*cherrygo.Server, error) {
+	klog.V(2).Infof("called serverByName with projectID %d nodeName %s", projectID, nodeName)
 	if string(nodeName) == "" {
 		return nil, errors.New("node name cannot be empty string")
 	}
 	servers, _, err := client.Servers.List(projectID, nil)
 	if err != nil {
-		klog.V(2).Infof("error listing servers for project %s: %v", projectID, err)
+		klog.V(2).Infof("error listing servers for project %d: %v", projectID, err)
 		return nil, err
 	}
 
@@ -168,24 +169,28 @@ func serverByName(client *cherrygo.Client, projectID string, nodeName types.Node
 //
 // The providerID spec should be retrievable from the Kubernetes
 // node object. The expected format is: cherryservers://server-id or just server-id
-func serverIDFromProviderID(providerID string) (string, error) {
+func serverIDFromProviderID(providerID string) (serverID int, err error) {
 	klog.V(2).Infof("called serverIDFromProviderID with providerID %s", providerID)
 	if providerID == "" {
-		return "", errors.New("providerID cannot be empty string")
+		return serverID, errors.New("providerID cannot be empty string")
 	}
 
+	var serverIDString string
 	split := strings.Split(providerID, "://")
-	var serverID string
 	switch len(split) {
 	case 2:
-		serverID = split[1]
 		if split[0] != ProviderName {
-			return "", fmt.Errorf("provider name from providerID should be %s, was %s", ProviderName, split[0])
+			return serverID, fmt.Errorf("provider name from providerID should be %s, was %s", ProviderName, split[0])
 		}
+		serverIDString = split[1]
 	case 1:
-		serverID = providerID
+		serverIDString = providerID
 	default:
-		return "", fmt.Errorf("unexpected providerID format: %s, format should be: 'server-id' or 'cherryservers://server-id'", providerID)
+		return serverID, fmt.Errorf("unexpected providerID format: %s, format should be: 'server-id' or 'cherryservers://server-id'", providerID)
+	}
+	serverID, err = strconv.Atoi(serverIDString)
+	if err != nil {
+		return serverID, fmt.Errorf("error converting serverID from providerID: %w", err)
 	}
 
 	return serverID, nil

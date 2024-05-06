@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 	"github.com/cherryservers/cloud-provider-cherry/cherry/server/store"
 	randomdata "github.com/pallinder/go-randomdata"
 )
@@ -26,7 +26,7 @@ func testGetOrCreateValidRegion(name, code string, backend store.DataStore) (*ch
 }
 
 // find a valid plan or create it
-func testGetOrCreateValidPlan(name string, backend store.DataStore) (*cherrygo.Plans, error) {
+func testGetOrCreateValidPlan(name string, backend store.DataStore) (*cherrygo.Plan, error) {
 	plan, err := backend.GetPlanByName(name)
 	if err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func testGetNewServerName() string {
 	return fmt.Sprintf("server-%d", rand.Intn(1000))
 }
 
-func testCreateAddress(ipv6, public bool) cherrygo.IPAddresses {
+func testCreateAddress(ipv6, public bool) cherrygo.IPAddress {
 	family := 4
 	if ipv6 {
 		family = 6
@@ -59,7 +59,7 @@ func testCreateAddress(ipv6, public bool) cherrygo.IPAddresses {
 	if !public {
 		addrType = "private-ip"
 	}
-	address := cherrygo.IPAddresses{
+	address := cherrygo.IPAddress{
 		Address:       ipaddr,
 		AddressFamily: int(family),
 		Type:          addrType,

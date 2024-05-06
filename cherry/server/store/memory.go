@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 )
 
 // Memory is an implementation of DataStore which stores everything in memory
@@ -13,7 +13,7 @@ type Memory struct {
 	counter  int
 	regions  map[int]*cherrygo.Region
 	servers  map[int]*cherrygo.Server
-	plans    map[int]*cherrygo.Plans
+	plans    map[int]*cherrygo.Plan
 	projects map[int]*cherrygo.Project
 }
 
@@ -22,7 +22,7 @@ func NewMemory() *Memory {
 	mem := &Memory{
 		regions:  map[int]*cherrygo.Region{},
 		servers:  map[int]*cherrygo.Server{},
-		plans:    map[int]*cherrygo.Plans{},
+		plans:    map[int]*cherrygo.Plan{},
 		projects: map[int]*cherrygo.Project{},
 	}
 	// create default plan
@@ -97,8 +97,8 @@ func (m *Memory) GetRegionByCode(code string) (*cherrygo.Region, error) {
 }
 
 // CreatePlan create a single plan
-func (m *Memory) CreatePlan(name string) (*cherrygo.Plans, error) {
-	plan := &cherrygo.Plans{
+func (m *Memory) CreatePlan(name string) (*cherrygo.Plan, error) {
+	plan := &cherrygo.Plan{
 		ID:   m.getID(),
 		Name: name,
 	}
@@ -107,10 +107,10 @@ func (m *Memory) CreatePlan(name string) (*cherrygo.Plans, error) {
 }
 
 // ListPlans list all plans
-func (m *Memory) ListPlans() ([]*cherrygo.Plans, error) {
+func (m *Memory) ListPlans() ([]*cherrygo.Plan, error) {
 	count := len(m.plans)
 	if count != 0 {
-		plans := make([]*cherrygo.Plans, 0, count)
+		plans := make([]*cherrygo.Plan, 0, count)
 		for _, v := range m.plans {
 			if len(plans) >= count {
 				break
@@ -123,7 +123,7 @@ func (m *Memory) ListPlans() ([]*cherrygo.Plans, error) {
 }
 
 // GetPlan get plan by ID
-func (m *Memory) GetPlan(id int) (*cherrygo.Plans, error) {
+func (m *Memory) GetPlan(id int) (*cherrygo.Plan, error) {
 	if plan, ok := m.plans[id]; ok {
 		return plan, nil
 	}
@@ -131,7 +131,7 @@ func (m *Memory) GetPlan(id int) (*cherrygo.Plans, error) {
 }
 
 // GetPlanByName get plan by name
-func (m *Memory) GetPlanByName(name string) (*cherrygo.Plans, error) {
+func (m *Memory) GetPlanByName(name string) (*cherrygo.Plan, error) {
 	for _, p := range m.plans {
 		if p.Name == name {
 			return p, nil
@@ -141,13 +141,13 @@ func (m *Memory) GetPlanByName(name string) (*cherrygo.Plans, error) {
 }
 
 // CreateServer creates a new server
-func (m *Memory) CreateServer(projectID int, name string, plan cherrygo.Plans, region cherrygo.Region) (*cherrygo.Server, error) {
+func (m *Memory) CreateServer(projectID int, name string, plan cherrygo.Plan, region cherrygo.Region) (*cherrygo.Server, error) {
 	server := &cherrygo.Server{
 		ID:       m.getID(),
 		Hostname: name,
 		State:    "active",
 		Region:   region,
-		Plans:    plan,
+		Plan:     plan,
 		Project: cherrygo.Project{
 			ID: projectID,
 		},

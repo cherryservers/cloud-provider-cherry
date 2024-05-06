@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 	"github.com/cherryservers/cloud-provider-cherry/cherry/loadbalancers"
 	"github.com/cherryservers/cloud-provider-cherry/cherry/loadbalancers/empty"
 	"github.com/cherryservers/cloud-provider-cherry/cherry/loadbalancers/kubevip"
@@ -29,7 +29,7 @@ import (
 type loadBalancers struct {
 	client              *cherrygo.Client
 	k8sclient           kubernetes.Interface
-	project             string
+	project             int
 	region              string
 	clusterID           string
 	implementor         loadbalancers.LB
@@ -43,7 +43,7 @@ type loadBalancers struct {
 	bgpEnabler
 }
 
-func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, projectID, region, config string, annotationLocalASN, annotationPeerASN, annotationPeerIP, annotationSrcIP, fipRegionAnnotation, nodeSelector string, bgpEnabler bgpEnabler) (*loadBalancers, error) {
+func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, projectID int, region, config string, annotationLocalASN, annotationPeerASN, annotationPeerIP, annotationSrcIP, fipRegionAnnotation, nodeSelector string, bgpEnabler bgpEnabler) (*loadBalancers, error) {
 	selector := labels.Everything()
 	if nodeSelector != "" {
 		selector, _ = labels.Parse(nodeSelector)
@@ -108,9 +108,9 @@ func (l *loadBalancers) GetLoadBalancer(_ context.Context, _ string, service *v1
 	var svcIPCidr string
 
 	// get IP address reservations and check if they any exists for this svc
-	ips, _, err := l.client.IPAddresses.List(l.project)
+	ips, _, err := l.client.IPAddresses.List(l.project, nil)
 	if err != nil {
-		return nil, false, fmt.Errorf("unable to retrieve IP reservations for project %s: %w", l.project, err)
+		return nil, false, fmt.Errorf("unable to retrieve IP reservations for project %d: %w", l.project, err)
 	}
 	klog.V(2).Infof("got ips")
 	for _, ip := range ips {
@@ -150,9 +150,9 @@ func (l *loadBalancers) GetLoadBalancerName(_ context.Context, _ string, service
 func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, _ string, service *v1.Service, nodes []*v1.Node) (*v1.LoadBalancerStatus, error) {
 	klog.V(2).Infof("EnsureLoadBalancer(): add: service %s/%s", service.Namespace, service.Name)
 	// get IP address reservations and check if they any exists for this svc
-	ips, _, err := l.client.IPAddresses.List(l.project)
+	ips, _, err := l.client.IPAddresses.List(l.project, nil)
 	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve IP reservations for project %s: %w", l.project, err)
+		return nil, fmt.Errorf("unable to retrieve IP reservations for project %d: %w", l.project, err)
 	}
 	ipCidr, err := l.addService(ctx, service, ips, filterNodes(nodes, l.nodeSelector))
 	if err != nil {
@@ -228,9 +228,9 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, _ string,
 	var svcIPCidr string
 
 	// get IP address reservations and check if they any exists for this svc
-	ips, _, err := l.client.IPAddresses.List(l.project)
+	ips, _, err := l.client.IPAddresses.List(l.project, nil)
 	if err != nil {
-		return fmt.Errorf("unable to retrieve IP reservations for project %s: %w", l.project, err)
+		return fmt.Errorf("unable to retrieve IP reservations for project %d: %w", l.project, err)
 	}
 
 	ipReservation := ipReservationByAllTags(map[string]string{svcTag: svcValue, clsTag: clsValue, cherryTag: cherryValue}, ips)
@@ -244,7 +244,7 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, _ string,
 	}
 	// delete the reservation
 	klog.V(2).Infof("EnsureLoadBalancerDeleted(): remove: for %s EIP ID %s", svcName, ipReservation.ID)
-	if _, _, err := l.client.IPAddress.Remove(l.project, &cherrygo.RemoveIPAddress{ID: ipReservation.ID}); err != nil {
+	if _, err := l.client.IPAddresses.Remove(ipReservation.ID); err != nil {
 		return fmt.Errorf("failed to remove IP address reservation %s from project: %w", ipReservation.ID, err)
 	}
 	// remove it from any implementation-specific parts
@@ -263,10 +263,6 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, _ string,
 func (l *loadBalancers) annotateNode(ctx context.Context, node *v1.Node) error {
 	klog.V(2).Infof("annotateNode: %s", node.Name)
 	// get the node provider ID
-	id, err := serverIDFromProviderID(node.Spec.ProviderID)
-	if err != nil {
-		return fmt.Errorf("unable to get device ID from providerID: %w", err)
-	}
 
 	// add annotations
 	annotations := node.Annotations
@@ -275,7 +271,7 @@ func (l *loadBalancers) annotateNode(ctx context.Context, node *v1.Node) error {
 	}
 
 	// get the bgp info
-	bgpConfig, err := l.ensureNodeBGPEnabled(id)
+	bgpConfig, err := l.ensureNodeBGPEnabled(node.Spec.ProviderID)
 	switch {
 	case err != nil:
 		return fmt.Errorf("could not get BGP info for node %s: %w", node.Name, err)
@@ -330,7 +326,7 @@ func (l *loadBalancers) annotateNode(ctx context.Context, node *v1.Node) error {
 }
 
 // addService add a single service; wraps the implementation
-func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []cherrygo.IPAddresses, nodes []*v1.Node) (string, error) {
+func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []cherrygo.IPAddress, nodes []*v1.Node) (string, error) {
 	svcName := serviceRep(svc)
 	svcTag, svcValue := serviceTag(svc)
 	svcRegion := serviceAnnotation(svc, l.fipRegionAnnotation)
@@ -371,7 +367,7 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 				return "", errors.New("unable to create load balancer when no IP or region specified, either globally or on service")
 			}
 
-			ipAddr, _, err := l.client.IPAddress.Create(l.project, &req)
+			ipAddr, _, err := l.client.IPAddresses.Create(l.project, &req)
 			if err != nil {
 				return "", fmt.Errorf("failed to request an IP for the load balancer: %w", err)
 			}

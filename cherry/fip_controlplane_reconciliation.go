@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cherryservers/cherrygo"
+	cherrygo "github.com/cherryservers/cherrygo/v3"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -56,7 +56,7 @@ type controlPlaneEndpointManager struct {
 	fipTagKey             string
 	fipTagValue           string
 	cherryClient          *cherrygo.Client
-	projectID             string
+	projectID             int
 	httpClient            *http.Client
 	k8sclient             kubernetes.Interface
 	assignmentMutex       sync.Mutex
@@ -66,7 +66,7 @@ type controlPlaneEndpointManager struct {
 	useHostIP             bool
 }
 
-func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan struct{}, fipTag, projectID string, cherryClient *cherrygo.Client, apiServerPort int32, useHostIP bool) (*controlPlaneEndpointManager, error) {
+func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32, useHostIP bool) (*controlPlaneEndpointManager, error) {
 	klog.V(2).Info("newControlPlaneEndpointManager()")
 
 	if fipTag == "" {
@@ -246,7 +246,7 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 	return m, nil
 }
 
-func (m *controlPlaneEndpointManager) reassign(_ context.Context, nodes []*v1.Node, ip *cherrygo.IPAddresses, fipURL string) error {
+func (m *controlPlaneEndpointManager) reassign(_ context.Context, nodes []*v1.Node, ip *cherrygo.IPAddress, fipURL string) error {
 	klog.V(2).Info("controlPlaneEndpoint.reassign")
 	// must have figured out the node port first, or nothing to do
 	if m.nodeAPIServerPort == 0 {
@@ -286,7 +286,7 @@ func (m *controlPlaneEndpointManager) reassign(_ context.Context, nodes []*v1.No
 				if err != nil {
 					return err
 				}
-				if _, _, err := m.cherryClient.IPAddress.Update(m.projectID, ip.ID, &cherrygo.UpdateIPAddress{TargetedTo: serverID}); err != nil {
+				if _, _, err := m.cherryClient.IPAddresses.Update(ip.ID, &cherrygo.UpdateIPAddress{TargetedTo: fmt.Sprintf("%d", serverID)}); err != nil {
 					return err
 				}
 				klog.Infof("control plane endpoint assigned to new server %s", node.Name)
@@ -308,8 +308,8 @@ func isControlPlaneNode(node *v1.Node) bool {
 	return false
 }
 
-func (m *controlPlaneEndpointManager) getControlPlaneEndpointReservation() (*cherrygo.IPAddresses, error) {
-	ipList, _, err := m.cherryClient.IPAddresses.List(m.projectID)
+func (m *controlPlaneEndpointManager) getControlPlaneEndpointReservation() (*cherrygo.IPAddress, error) {
+	ipList, _, err := m.cherryClient.IPAddresses.List(m.projectID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (m *controlPlaneEndpointManager) getControlPlaneEndpointReservation() (*che
 }
 
 // nodeIsAssigned determine if the cherrgo.IPAddresses is assigned to the server represented by the Kubernetes v1.Node
-func (m *controlPlaneEndpointManager) nodeIsAssigned(_ context.Context, node *v1.Node, ipReservation *cherrygo.IPAddresses) (bool, error) {
+func (m *controlPlaneEndpointManager) nodeIsAssigned(_ context.Context, node *v1.Node, ipReservation *cherrygo.IPAddress) (bool, error) {
 	for _, na := range node.Status.Addresses {
 		if na.Address == ipReservation.Address {
 			return true, nil
@@ -408,7 +408,7 @@ func (m *controlPlaneEndpointManager) tryReassignAwayFromSelf(ctx context.Contex
 
 // tryReassign try to reassign the controlplane endpoint to a new node.
 // Anything calling this function should be wrapped by a lock on m.assignmentMutex.
-func (m *controlPlaneEndpointManager) tryReassign(ctx context.Context, controlPlaneEndpoint *cherrygo.IPAddresses, filters ...nodeFilter) error {
+func (m *controlPlaneEndpointManager) tryReassign(ctx context.Context, controlPlaneEndpoint *cherrygo.IPAddress, filters ...nodeFilter) error {
 	controlPlaneHealthURL := m.healthURLFromControlPlaneEndpoint(controlPlaneEndpoint)
 	nodeSet := newNodeSet()
 
@@ -433,7 +433,7 @@ func (m *controlPlaneEndpointManager) tryReassign(ctx context.Context, controlPl
 }
 
 // healthURLFromControlPlaneEndpoint construct the URL for the controlplane endpoint healthcheck
-func (m *controlPlaneEndpointManager) healthURLFromControlPlaneEndpoint(controlPlaneEndpoint *cherrygo.IPAddresses) string {
+func (m *controlPlaneEndpointManager) healthURLFromControlPlaneEndpoint(controlPlaneEndpoint *cherrygo.IPAddress) string {
 	return fmt.Sprintf("https://%s:%d/healthz", controlPlaneEndpoint.Address, m.apiServerPort)
 }
 
