@@ -100,12 +100,12 @@ require (
 )
 
 require (
-	k8s.io/api v0.31.0
-	k8s.io/apimachinery v0.31.0
+	k8s.io/api v0.31.3
+	k8s.io/apimachinery v0.31.3
 	k8s.io/apiserver v0.31.0 // indirect
-	k8s.io/client-go v0.31.0
+	k8s.io/client-go v0.31.3
 	k8s.io/cloud-provider v0.31.0
-	k8s.io/component-base v0.31.0
+	k8s.io/component-base v0.31.3
 	k8s.io/component-helpers v0.31.0 // indirect
 	k8s.io/controller-manager v0.31.0 // indirect
 	k8s.io/klog/v2 v2.130.1
