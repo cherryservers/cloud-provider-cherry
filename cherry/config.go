@@ -197,6 +197,6 @@ func getConfig(providerConfig io.Reader) (Config, error) {
 func printConfig(config Config) {
 	lines := config.Strings()
 	for _, l := range lines {
-		klog.Infof(l)
+		klog.Info(l)
 	}
 }
