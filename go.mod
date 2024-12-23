@@ -10,7 +10,7 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/pallinder/go-randomdata v1.2.0
 	github.com/spf13/pflag v1.0.5
-	go.universe.tf/metallb v0.14.8
+	go.universe.tf/metallb v0.14.9
 	golang.org/x/exp v0.0.0-20241210194714-1829a127f884
 )
 
