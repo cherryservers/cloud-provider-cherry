@@ -104,7 +104,7 @@ require (
 require (
 	k8s.io/api v0.32.0
 	k8s.io/apiextensions-apiserver v0.32.0 // indirect
-	k8s.io/apimachinery v0.32.0
+	k8s.io/apimachinery v0.32.1
 	k8s.io/apiserver v0.32.0 // indirect
 	k8s.io/client-go v0.32.0
 	k8s.io/cloud-provider v0.32.0
