@@ -129,9 +129,9 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 				return isControlPlaneNode(n)
 			},
 			Handler: cache.ResourceEventHandlerFuncs{
-				UpdateFunc: func(old, new interface{}) {
-					oldNode, _ := old.(*v1.Node)
-					newNode, _ := new.(*v1.Node)
+				UpdateFunc: func(oldN, newN interface{}) {
+					oldNode, _ := oldN.(*v1.Node)
+					newNode, _ := newN.(*v1.Node)
 					klog.Infof("handling update, node: %s", newNode.Name)
 
 					if (oldNode.Spec.Unschedulable != newNode.Spec.Unschedulable) && newNode.Spec.Unschedulable {
