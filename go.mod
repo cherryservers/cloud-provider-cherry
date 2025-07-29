@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.2
 
 require (
-	github.com/cherryservers/cherrygo/v3 v3.6.0
+	github.com/cherryservers/cherrygo/v3 v3.8.0
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/pallinder/go-randomdata v1.2.0
