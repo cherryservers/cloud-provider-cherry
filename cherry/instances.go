@@ -81,7 +81,7 @@ func (i *instances) InstanceMetadata(_ context.Context, node *v1.Node) (*cloudpr
 	// Cherry Servers just have regions, which matchK8s topology regions. We do not have zones for now.
 	//
 	// https://kubernetes.io/docs/reference/labels-annotations-taints/#topologykubernetesiozone
-	r = server.Region.Name
+	r = server.Region.Slug
 
 	return &cloudprovider.InstanceMetadata{
 		ProviderID:    providerIDFromServer(server),
