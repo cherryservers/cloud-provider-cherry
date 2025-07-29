@@ -211,7 +211,7 @@ func TestInstanceZone(t *testing.T) {
 		{"empty name", "", "", cloudprovider.InstanceNotFound},
 		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("error converting")},
 		{"unknown name", fmt.Sprintf("%d", randomID), "", cloudprovider.InstanceNotFound},
-		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), server.Region.Name, nil},
+		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), server.Region.Slug, nil},
 	}
 
 	for i, tt := range tests {
