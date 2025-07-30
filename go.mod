@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/pallinder/go-randomdata v1.2.0
-	github.com/spf13/pflag v1.0.6
+	github.com/spf13/pflag v1.0.7
 	go.universe.tf/metallb v0.15.2
 	golang.org/x/exp v0.0.0-20241210194714-1829a127f884
 )
