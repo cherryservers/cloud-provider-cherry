@@ -72,39 +72,57 @@ func serverWithK8S(projectID int, sshKeys []string) (*cherrygo.Server, error) {
 	return &srv, nil
 }
 
+// Print error message to stderr and exit with code 1.
+func failInit(msg string) {
+	fmt.Fprint(os.Stderr, msg)
+	os.Exit(1)
+}
+
+type sweeper struct {
+	projectID int
+}
+
+func (s sweeper) sweep() {
+	cherryClient.Projects.Delete(s.projectID)
+}
+
+// Print error message to stderr and exit with code 1.
+// The sweeper hook is used to dispose of lingering resources.
+func failInitWithSweep(msg string, s sweeper) {
+	fmt.Fprint(os.Stderr, msg)
+	s.sweep()
+	os.Exit(1)
+}
+
 func TestMain(m *testing.M) {
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load test config: %v", err)
-		os.Exit(1)
+		failInit(fmt.Sprintf("failed to load test config: %v", err))
 	}
 
 	err = initCherryClient(cfg.apiToken)
 	if err != nil {
-		fmt.Fprint(os.Stderr, err.Error())
-		os.Exit(1)
+		failInit(err.Error())
 	}
 
 	project, _, err := cherryClient.Projects.Create(cfg.teamID, &cherrygo.CreateProject{
 		Name: "kubernetes-ccm-test", Bgp: true})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create project: %v", err)
-		os.Exit(1)
+		failInit(fmt.Sprintf("failed to create project: %v", err))
 	}
+
+	sw := sweeper{projectID: project.ID}
 
 	cpNode, err := serverWithK8S(project.ID, cfg.sshKeys)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to provision k8s control plane node: %v", err)
-		os.Exit(1)
+		failInitWithSweep(fmt.Sprintf("failed to provision k8s control plane node: %v", err), sw)
 	}
 
 	// wait for control plane node to become active
 	expBackoff(func() (bool, error) {
 		srv, _, err := cherryClient.Servers.Get(cpNode.ID, nil)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error while waiting for control plane node to become active: %v", err)
-			cherryClient.Servers.Delete(cpNode.ID)
-			os.Exit(1)
+			failInitWithSweep(fmt.Sprintf("error while waiting for control plane node to become active: %v", err), sw)
 		}
 		cpNode = &srv
 		if cpNode.State == "active" {
@@ -118,7 +136,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	// can't use defer, because os.Exit bypasses it
-	cherryClient.Servers.Delete(cpNode.ID)
+	sw.sweep()
 	os.Exit(code)
 
 }
