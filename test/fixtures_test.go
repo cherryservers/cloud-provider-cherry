@@ -49,7 +49,7 @@ func initCherryClient(apiToken string) error {
 	return nil
 }
 
-// Provisions a Cherry Servers server with kubernetes running.
+// Provisions a Cherry Servers server and waits for it to become active.
 func serverWithK8S(projectID int, sshKeys []string) (*cherrygo.Server, error) {
 	userDataRaw, err := os.ReadFile(userDataPath)
 	if err != nil {
@@ -66,8 +66,19 @@ func serverWithK8S(projectID int, sshKeys []string) (*cherrygo.Server, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to provision master server instance: %w", err)
+		return nil, fmt.Errorf("failed to create server: %w", err)
 	}
+
+	expBackoff(func() (bool, error) {
+		srv, _, err = cherryClient.Servers.Get(srv.ID, nil)
+		if err != nil {
+			return false, fmt.Errorf("failed to get server: %w", err)
+		}
+		if srv.State == "active" {
+			return true, nil
+		}
+		return false, nil
+	}, defaultExpBackoffConfig())
 
 	return &srv, nil
 }
@@ -117,19 +128,6 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		failInitWithSweep(fmt.Sprintf("failed to provision k8s control plane node: %v", err), sw)
 	}
-
-	// wait for control plane node to become active
-	expBackoff(func() (bool, error) {
-		srv, _, err := cherryClient.Servers.Get(cpNode.ID, nil)
-		if err != nil {
-			failInitWithSweep(fmt.Sprintf("error while waiting for control plane node to become active: %v", err), sw)
-		}
-		cpNode = &srv
-		if cpNode.State == "active" {
-			return true, nil
-		}
-		return false, nil
-	}, defaultExpBackoffConfig())
 
 	cpNodeFixture = cpNode
 
