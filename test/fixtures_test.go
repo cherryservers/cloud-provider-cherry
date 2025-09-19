@@ -12,7 +12,7 @@ import (
 
 const (
 	apiTokenVar        = "CHERRY_TEST_API_TOKEN"
-	projectIDVar       = "CHERRY_TEST_PROJECT_ID"
+	teamIDVar          = "CHERRY_TEST_TEAM_ID"
 	sshKeyIDVar        = "CHERRY_TEST_SSH_KEY_ID"
 	serverImage        = "ubuntu_24_04_64bit"
 	masterServerPlan   = "B1-4-4gb-80s-shared"
@@ -24,20 +24,20 @@ var cherryClient *cherrygo.Client
 var cpNodeFixture *cherrygo.Server
 
 type config struct {
-	apiToken  string
-	projectID int
-	sshKeys   []string
+	apiToken string
+	teamID   int
+	sshKeys  []string
 }
 
 // Loads configuration from env vars.
 func loadConfig() (config, error) {
 	apiToken := os.Getenv(apiTokenVar)
-	projectID, err := strconv.Atoi(os.Getenv(projectIDVar))
+	teamID, err := strconv.Atoi(os.Getenv(teamIDVar))
 	if err != nil {
 		return config{}, fmt.Errorf("failed to parse project ID: %w", err)
 	}
 	sshKeys := []string{os.Getenv(sshKeyIDVar)}
-	return config{apiToken, projectID, sshKeys}, nil
+	return config{apiToken, teamID, sshKeys}, nil
 }
 
 func initCherryClient(apiToken string) error {
@@ -49,7 +49,7 @@ func initCherryClient(apiToken string) error {
 	return nil
 }
 
-// provision a Cherry Servers server with kubernetes running
+// Provisions a Cherry Servers server with kubernetes running.
 func serverWithK8S(projectID int, sshKeys []string) (*cherrygo.Server, error) {
 	userDataRaw, err := os.ReadFile(userDataPath)
 	if err != nil {
@@ -85,7 +85,14 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	cpNode, err := serverWithK8S(cfg.projectID, cfg.sshKeys)
+	project, _, err := cherryClient.Projects.Create(cfg.teamID, &cherrygo.CreateProject{
+		Name: "kubernetes-ccm-test", Bgp: true})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create project: %v", err)
+		os.Exit(1)
+	}
+
+	cpNode, err := serverWithK8S(project.ID, cfg.sshKeys)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to provision k8s control plane node: %v", err)
 		os.Exit(1)
