@@ -23,7 +23,7 @@ const (
 	userDataPath = "./testdata/cloud-config/init-microk8s.yaml"
 )
 
-var cherryClient *cherrygo.Client
+var cherryClientFixture *cherrygo.Client
 var sshFixture *sshCmdRunner
 var cpNodeFixture *cherrygo.Server
 
@@ -79,9 +79,9 @@ func loadConfig() (config, error) {
 	return config{apiToken, teamID}, nil
 }
 
-func initCherryClient(apiToken string) error {
+func cherryClient(apiToken string) error {
 	var err error
-	cherryClient, err = cherrygo.NewClient(cherrygo.WithAuthToken(apiToken))
+	cherryClientFixture, err = cherrygo.NewClient(cherrygo.WithAuthToken(apiToken))
 	if err != nil {
 		return fmt.Errorf("failed to initialize cherrygo client: %w", err)
 	}
@@ -118,7 +118,7 @@ func createServerWithK8s(projectID int, sshKeys []string) (*cherrygo.Server, err
 		return nil, fmt.Errorf("failed to read user data file: %w", err)
 	}
 
-	srv, _, err := cherryClient.Servers.Create(&cherrygo.CreateServer{
+	srv, _, err := cherryClientFixture.Servers.Create(&cherrygo.CreateServer{
 		ProjectID: projectID,
 		Plan:      serverPlan,
 		Region:    serverRegion,
@@ -132,7 +132,7 @@ func createServerWithK8s(projectID int, sshKeys []string) (*cherrygo.Server, err
 	}
 
 	expBackoff(func() (bool, error) {
-		srv, _, err = cherryClient.Servers.Get(srv.ID, nil)
+		srv, _, err = cherryClientFixture.Servers.Get(srv.ID, nil)
 		if err != nil {
 			return false, fmt.Errorf("failed to get server: %w", err)
 		}
@@ -165,7 +165,7 @@ func runMain(m *testing.M) (code int, err error) {
 		return 1, fmt.Errorf("failed to load test config: %w", err)
 	}
 
-	err = initCherryClient(cfg.apiToken)
+	err = cherryClient(cfg.apiToken)
 	if err != nil {
 		return 1, err
 	}
@@ -179,7 +179,7 @@ func runMain(m *testing.M) (code int, err error) {
 
 	pub := ssh.MarshalAuthorizedKey(sig.PublicKey())
 	pub = pub[:len(pub)-1] // strip newline
-	sshKey, _, err := cherryClient.SSHKeys.Create(&cherrygo.CreateSSHKey{
+	sshKey, _, err := cherryClientFixture.SSHKeys.Create(&cherrygo.CreateSSHKey{
 		Label: "kubernetes-ccm-test",
 		Key:   string(pub),
 	})
@@ -187,15 +187,15 @@ func runMain(m *testing.M) (code int, err error) {
 		return 1, fmt.Errorf("failed to create SSH key on cherry servers: %w", err)
 	}
 
-	defer cherryClient.SSHKeys.Delete(sshKey.ID)
+	defer cherryClientFixture.SSHKeys.Delete(sshKey.ID)
 
-	project, _, err := cherryClient.Projects.Create(cfg.teamID, &cherrygo.CreateProject{
+	project, _, err := cherryClientFixture.Projects.Create(cfg.teamID, &cherrygo.CreateProject{
 		Name: "kubernetes-ccm-test", Bgp: true})
 	if err != nil {
 		return 1, fmt.Errorf("failed to create project: %w", err)
 	}
 
-	defer cherryClient.Projects.Delete(project.ID)
+	defer cherryClientFixture.Projects.Delete(project.ID)
 
 	cpNode, err := createServerWithK8s(project.ID, []string{strconv.Itoa(sshKey.ID)})
 	if err != nil {
