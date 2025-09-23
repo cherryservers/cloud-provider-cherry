@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"testing"
@@ -158,45 +159,20 @@ func createServerWithK8s(projectID int, sshKeys []string) (*cherrygo.Server, err
 	return &srv, nil
 }
 
-type sweeper struct {
-	projectID int
-	sshKeyID  int
-}
-
-func (s sweeper) sweep() {
-	if s.projectID != 0 {
-		cherryClient.Projects.Delete(s.projectID)
-	}
-	if s.sshKeyID != 0 {
-		cherryClient.SSHKeys.Delete(s.sshKeyID)
-	}
-
-}
-
-// Print error message to stderr and exit with code 1.
-// The sweeper hook is used to dispose of lingering resources.
-func failInit(msg string, s sweeper) {
-	fmt.Fprint(os.Stderr, msg)
-	s.sweep()
-	os.Exit(1)
-}
-
-func TestMain(m *testing.M) {
-	sw := sweeper{}
-
+func runMain(m *testing.M) (code int, err error) {
 	cfg, err := loadConfig()
 	if err != nil {
-		failInit(fmt.Sprintf("failed to load test config: %v", err), sw)
+		return 1, fmt.Errorf("failed to load test config: %w", err)
 	}
 
 	err = initCherryClient(cfg.apiToken)
 	if err != nil {
-		failInit(err.Error(), sw)
+		return 1, err
 	}
 
 	sig, err := sshSigner()
 	if err != nil {
-		failInit(fmt.Sprintf("failed to generate SSH signer: %v", err), sw)
+		return 1, fmt.Errorf("failed to generate SSH signer: %w", err)
 	}
 
 	sshFixture = &sshCmdRunner{sig}
@@ -208,30 +184,36 @@ func TestMain(m *testing.M) {
 		Key:   string(pub),
 	})
 	if err != nil {
-		failInit(fmt.Sprintf("failed to create SSH key on cherry servers: %v", err), sw)
+		return 1, fmt.Errorf("failed to create SSH key on cherry servers: %w", err)
 	}
 
-	sw.sshKeyID = sshKey.ID
+	defer cherryClient.SSHKeys.Delete(sshKey.ID)
 
 	project, _, err := cherryClient.Projects.Create(cfg.teamID, &cherrygo.CreateProject{
 		Name: "kubernetes-ccm-test", Bgp: true})
 	if err != nil {
-		failInit(fmt.Sprintf("failed to create project: %v", err), sw)
+		return 1, fmt.Errorf("failed to create project: %w", err)
 	}
 
-	sw.projectID = project.ID
+	defer cherryClient.Projects.Delete(project.ID)
 
 	cpNode, err := createServerWithK8s(project.ID, []string{strconv.Itoa(sshKey.ID)})
 	if err != nil {
-		failInit(fmt.Sprintf("failed to provision k8s control plane node: %v", err), sw)
+		return 1, fmt.Errorf("failed to provision k8s control plane node: %w", err)
 	}
 
 	cpNodeFixture = cpNode
 
-	code := m.Run()
+	code = m.Run()
+	return code, nil
+}
 
-	// can't use defer, because os.Exit bypasses it
-	sw.sweep()
+func TestMain(m *testing.M) {
+	code, err := runMain(m)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	os.Exit(code)
 
 }
