@@ -31,11 +31,31 @@ const (
 
 var cherryClientFixture *cherrygo.Client
 var sshFixture *sshCmdRunner
-var cpNodeFixture *cherrygo.Server
+var cpNodeFixture *node
 
 type config struct {
 	apiToken string
 	teamID   int
+}
+
+// loadConfig loads test configuration from environment variables.
+func loadConfig() (config, error) {
+	apiToken := os.Getenv(apiTokenVar)
+	teamID, err := strconv.Atoi(os.Getenv(teamIDVar))
+	if err != nil {
+		return config{}, fmt.Errorf("failed to parse project ID: %w", err)
+	}
+	return config{apiToken, teamID}, nil
+}
+
+// cherryClient initializes cherrygo client fixture.
+func cherryClient(apiToken string) error {
+	var err error
+	cherryClientFixture, err = cherrygo.NewClient(cherrygo.WithAuthToken(apiToken))
+	if err != nil {
+		return fmt.Errorf("failed to initialize cherrygo client: %w", err)
+	}
+	return nil
 }
 
 type sshCmdRunner struct {
@@ -75,26 +95,7 @@ func (s sshCmdRunner) run(addr, cmd string) (string, error) {
 	return b.String(), nil
 }
 
-// Loads configuration from env vars.
-func loadConfig() (config, error) {
-	apiToken := os.Getenv(apiTokenVar)
-	teamID, err := strconv.Atoi(os.Getenv(teamIDVar))
-	if err != nil {
-		return config{}, fmt.Errorf("failed to parse project ID: %w", err)
-	}
-	return config{apiToken, teamID}, nil
-}
-
-func cherryClient(apiToken string) error {
-	var err error
-	cherryClientFixture, err = cherrygo.NewClient(cherrygo.WithAuthToken(apiToken))
-	if err != nil {
-		return fmt.Errorf("failed to initialize cherrygo client: %w", err)
-	}
-	return nil
-}
-
-func sshSigner() (ssh.Signer, error) {
+func newSshCmdRunner() (*sshCmdRunner, error) {
 	_, pri, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ed25519 keys: %w", err)
@@ -105,32 +106,45 @@ func sshSigner() (ssh.Signer, error) {
 		return nil, fmt.Errorf("failed to generate key signer: %w", err)
 	}
 
-	return sig, nil
+	s := sshCmdRunner{sig}
+	return &s, nil
 }
 
-func serverPublicIP(srv cherrygo.Server) (string, error) {
-	for _, ip := range srv.IPAddresses {
-		if ip.Type == "primary-ip" {
-			return ip.Address, nil
-		}
+type node struct {
+	server    cherrygo.Server
+	cmdRunner sshCmdRunner
+}
+
+// runCmd runs a shell command on the node via SSH.
+func (n node) runCmd(cmd string) (resp string, err error) {
+	ip, err := serverPublicIP(n.server)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("server %d has no public ip", srv.ID)
+	return n.cmdRunner.run(ip, cmd)
 }
 
-// Provisions a Cherry Servers server and waits for it k8s to be running.
-func createServerWithK8s(projectID int, sshKeys []string) (*cherrygo.Server, error) {
+type nodeProvisioner struct {
+	cherryClient cherrygo.Client
+	projectID    int
+	sshKeyID     string
+	cmdRunner    sshCmdRunner
+}
+
+// provision creates a Cherry Servers server and waits for k8s to be running.
+func (np nodeProvisioner) provision() (*node, error) {
 	userDataRaw, err := os.ReadFile(userDataPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read user data file: %w", err)
 	}
 
-	srv, _, err := cherryClientFixture.Servers.Create(&cherrygo.CreateServer{
-		ProjectID: projectID,
+	srv, _, err := np.cherryClient.Servers.Create(&cherrygo.CreateServer{
+		ProjectID: np.projectID,
 		Plan:      serverPlan,
 		Region:    region,
 		Image:     serverImage,
 		UserData:  base64.StdEncoding.EncodeToString(userDataRaw),
-		SSHKeys:   sshKeys,
+		SSHKeys:   []string{np.sshKeyID},
 	})
 
 	if err != nil {
@@ -138,7 +152,7 @@ func createServerWithK8s(projectID int, sshKeys []string) (*cherrygo.Server, err
 	}
 
 	expBackoff(func() (bool, error) {
-		srv, _, err = cherryClientFixture.Servers.Get(srv.ID, nil)
+		srv, _, err = np.cherryClient.Servers.Get(srv.ID, nil)
 		if err != nil {
 			return false, fmt.Errorf("failed to get server: %w", err)
 		}
@@ -155,20 +169,30 @@ func createServerWithK8s(projectID int, sshKeys []string) (*cherrygo.Server, err
 
 	expBackoff(func() (bool, error) {
 		// Check if kube-api is reachable. Non-zero exit code will be returned if not.
-		_, err = sshFixture.run(ip, "microk8s kubectl get nodes --no-headers")
+		_, err = np.cmdRunner.run(ip, "microk8s kubectl get nodes --no-headers")
 		if err != nil {
 			return false, nil
 		}
 		return true, nil
 	}, defaultExpBackoffConfig())
 
-	return &srv, nil
+	return &node{srv, np.cmdRunner}, nil
 }
+
+func serverPublicIP(srv cherrygo.Server) (string, error) {
+	for _, ip := range srv.IPAddresses {
+		if ip.Type == "primary-ip" {
+			return ip.Address, nil
+		}
+	}
+	return "", fmt.Errorf("server %d has no public ip", srv.ID)
+}
+
 
 // kubeconfig generates a kubeconfig file from the control plane node fixture.
 func kubeconfig() (f *os.File, err error) {
 	const cmd = "microk8s config"
-	pubIP, err := serverPublicIP(*cpNodeFixture)
+	pubIP, err := serverPublicIP(cpNodeFixture.server)
 	if err != nil {
 		return nil, fmt.Errorf("CP node has no public IP: %w", err)
 	}
@@ -270,14 +294,14 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 		return 1, err
 	}
 
-	sig, err := sshSigner()
+	sshRunner, err := newSshCmdRunner()
 	if err != nil {
-		return 1, fmt.Errorf("failed to generate SSH signer: %w", err)
+		return 1, fmt.Errorf("failed to create SSH runner: %w", err)
 	}
 
-	sshFixture = &sshCmdRunner{sig}
+	sshFixture = sshRunner
 
-	pub := ssh.MarshalAuthorizedKey(sig.PublicKey())
+	pub := ssh.MarshalAuthorizedKey(sshRunner.signer.PublicKey())
 	pub = pub[:len(pub)-1] // strip newline
 	sshKey, _, err := cherryClientFixture.SSHKeys.Create(&cherrygo.CreateSSHKey{
 		Label: "kubernetes-ccm-test",
@@ -286,7 +310,6 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	if err != nil {
 		return 1, fmt.Errorf("failed to create SSH key on cherry servers: %w", err)
 	}
-
 	defer cherryClientFixture.SSHKeys.Delete(sshKey.ID)
 
 	project, _, err := cherryClientFixture.Projects.Create(cfg.teamID, &cherrygo.CreateProject{
@@ -294,14 +317,13 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	if err != nil {
 		return 1, fmt.Errorf("failed to create project: %w", err)
 	}
-
 	defer cherryClientFixture.Projects.Delete(project.ID)
 
-	cpNode, err := createServerWithK8s(project.ID, []string{strconv.Itoa(sshKey.ID)})
+	np := nodeProvisioner{*cherryClientFixture, project.ID, strconv.Itoa(sshKey.ID), *sshRunner}
+	cpNode, err := np.provision()
 	if err != nil {
 		return 1, fmt.Errorf("failed to provision k8s control plane node: %w", err)
 	}
-
 	cpNodeFixture = cpNode
 
 	kf, err := kubeconfig()
