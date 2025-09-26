@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -289,14 +290,29 @@ func ccmSecret(apiToken, region string, projectID int) (path string, cleanup fun
 
 // runCcm runs the CCM using the go toolchain as a child process.
 // This child process is cancelled on interrupt or termination,
-// but the caller is responsible for context cancellation in normal program flow.
-func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes.Interface) error {
+// but the caller is responsible for cleanup in normal program flow.
+func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes.Interface) (cleanup func(), err error) {
 	cmd := exec.CommandContext(ctx, "go", "run", "..", "--cloud-provider=cherryservers",
 		"--leader-elect=false", "--authentication-skip-lookup=true",
 		"--kubeconfig="+kubeconfig, "--cloud-config="+secret)
-	err := cmd.Start()
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return err
+		log.Println("failed to create stderr pipe for ccm process")
+	} else {
+		go func() {
+			io.Copy(log.Writer(), stderr)
+		}()
+	}
+
+	err = cmd.Start()
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("ccm pid: %d\n", cmd.Process.Pid)
+
+	cleanup = func() {
+		cmd.Cancel()
+		cmd.Wait()
 	}
 
 	// Cancel child process on interrupt/termination.
@@ -305,8 +321,7 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 
 	go func() {
 		<-ctx.Done()
-		cmd.Cancel()
-		cmd.Wait()
+		cleanup()
 		stop()
 	}()
 
@@ -316,15 +331,14 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 	_, err = factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj any) {
 			newNode, _ := newObj.(*corev1.Node)
-			log.Printf("updating with %v", newNode)
 			// if there's no taints, the node was successfully registered by the ccm
 			if len(newNode.Spec.Taints) == 0 {
-				log.Println("reached 0 taints")
+				log.Printf("reached 0 taints for node %s\n", newNode.ObjectMeta.Name)
 				cancel()
 			}
 		}})
 	if err != nil {
-		return fmt.Errorf("failed to add node event handler: %w", err)
+		return nil, fmt.Errorf("failed to add node event handler: %w", err)
 	}
 
 	factory.Start(ctx.Done())
@@ -332,7 +346,7 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 	<-ctx.Done()
 	factory.Shutdown()
 
-	return nil
+	return cleanup, nil
 }
 
 func runMain(ctx context.Context, m *testing.M) (code int, err error) {
@@ -393,9 +407,12 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	}
 	defer cleanup()
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	runCcm(ctx, kubeconfig, secret, k8sClientFixture)
+
+	cleanup, err = runCcm(ctx, kubeconfig, secret, k8sClientFixture)
+	if err != nil {
+		return 1, fmt.Errorf("failed to start ccm: %w", err)
+	}
+	defer cleanup()
 
 	code = m.Run()
 	return code, nil
