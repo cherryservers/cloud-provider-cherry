@@ -7,17 +7,23 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	cherrygo "github.com/cherryservers/cherrygo/v3"
 	"golang.org/x/crypto/ssh"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -27,10 +33,11 @@ const (
 	serverPlan   = "B1-4-4gb-80s-shared"
 	region       = "LT-Siauliai"
 	userDataPath = "./testdata/cloud-config/init-microk8s.yaml"
+	resyncPeriod = 5 * time.Second
 )
 
 var cherryClientFixture *cherrygo.Client
-var sshFixture *sshCmdRunner
+var k8sClientFixture kubernetes.Interface
 var cpNodeFixture *node
 
 type config struct {
@@ -55,6 +62,20 @@ func cherryClient(apiToken string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize cherrygo client: %w", err)
 	}
+	return nil
+}
+
+// k8sClient initializes k8s clientset fixture.
+func k8sClient(kubeconfig string) error {
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return fmt.Errorf("Failed to build k8s config: %w", err)
+	}
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("Failed to build k8s clientset: %w", err)
+	}
+	k8sClientFixture = clientset
 	return nil
 }
 
@@ -124,6 +145,40 @@ func (n node) runCmd(cmd string) (resp string, err error) {
 	return n.cmdRunner.run(ip, cmd)
 }
 
+// kubeconfig generates a kubeconfig file from the node
+// and returns a path to it.
+func (n node) kubeconfig() (path string, cleanup func(), err error) {
+	const cmd = "microk8s config"
+	if err != nil {
+		return "", nil, fmt.Errorf("CP node has no public IP: %w", err)
+	}
+	k, err := n.runCmd(cmd)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to run '%s': %w", cmd, err)
+	}
+	f, err := os.CreateTemp("", "kubeconfig-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create temp file for kubeconfig: %w", err)
+	}
+	path = f.Name()
+	cleanup = fileCleanup(path)
+
+	_, err = f.WriteString(k)
+	if err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("failed to write kubeconfig contents: %w", err)
+	}
+
+	err = f.Close()
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("failed to close kubeconfig file: %w", err)
+	}
+
+	return path, cleanup, nil
+}
+
 type nodeProvisioner struct {
 	cherryClient cherrygo.Client
 	projectID    int
@@ -188,42 +243,16 @@ func serverPublicIP(srv cherrygo.Server) (string, error) {
 	return "", fmt.Errorf("server %d has no public ip", srv.ID)
 }
 
-
-// kubeconfig generates a kubeconfig file from the control plane node fixture.
-func kubeconfig() (f *os.File, err error) {
-	const cmd = "microk8s config"
-	pubIP, err := serverPublicIP(cpNodeFixture.server)
-	if err != nil {
-		return nil, fmt.Errorf("CP node has no public IP: %w", err)
+func fileCleanup(path string) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() { os.Remove(path) })
 	}
-	k, err := sshFixture.run(pubIP, cmd)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to run '%s': %w", cmd, err)
-	}
-	f, err = os.CreateTemp("", "kubeconfig-*")
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create temp file for kubeconfig: %w", err)
-	}
-
-	_, err = f.WriteString(k)
-	if err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return nil, fmt.Errorf("Failed to write kubeconfig contents: %w", err)
-	}
-
-	_, err = f.Seek(0, io.SeekStart)
-	if err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return nil, fmt.Errorf("Failed to seek cursor in kubeconfig file: %w", err)
-	}
-	return f, nil
 }
 
 // ccmSecret generates the secret required for CCM deployment
-// and returns a temp file that contains it.
-func ccmSecret(apiToken, region string, projectID int) (f *os.File, err error) {
+// and returns a path to a temp file with it.
+func ccmSecret(apiToken, region string, projectID int) (path string, cleanup func(), err error) {
 	s := struct {
 		APIKey    string `json:"apiKey"`
 		ProjectID int    `json:"projectId"`
@@ -232,35 +261,36 @@ func ccmSecret(apiToken, region string, projectID int) (f *os.File, err error) {
 
 	data, err := json.Marshal(s)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to marshall secret to json: %w", err)
+		return "", nil, fmt.Errorf("failed to marshall secret to json: %w", err)
 	}
 
-	f, err = os.CreateTemp("", "ccm-secret-*.json")
+	f, err := os.CreateTemp("", "ccm-secret-*.json")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp file for secret: %w", err)
+		return "", nil, fmt.Errorf("failed to create temp file for secret: %w", err)
 	}
+	path = f.Name()
+	cleanup = fileCleanup(path)
 
 	_, err = f.Write(data)
 	if err != nil {
 		f.Close()
-		os.Remove(f.Name())
-		return nil, fmt.Errorf("Failed to write secret to file: %w", err)
+		cleanup()
+		return "", nil, fmt.Errorf("failed to write secret to file: %w", err)
 	}
 
-	_, err = f.Seek(0, io.SeekStart)
+	err = f.Close()
 	if err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return nil, fmt.Errorf("failed to seek cursor in ccm secret file: %w", err)
+		cleanup()
+		return "", nil, fmt.Errorf("failed to close secret file: %w", err)
 	}
 
-	return f, nil
+	return path, cleanup, nil
 }
 
 // runCcm runs the CCM using the go toolchain as a child process.
 // This child process is cancelled on interrupt or termination,
 // but the caller is responsible for context cancellation in normal program flow.
-func runCcm(ctx context.Context, kubeconfig, secret string) error {
+func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes.Interface) error {
 	cmd := exec.CommandContext(ctx, "go", "run", "..", "--cloud-provider=cherryservers",
 		"--leader-elect=false", "--authentication-skip-lookup=true",
 		"--kubeconfig="+kubeconfig, "--cloud-config="+secret)
@@ -280,6 +310,28 @@ func runCcm(ctx context.Context, kubeconfig, secret string) error {
 		stop()
 	}()
 
+	ctx, cancel := context.WithCancel(ctx)
+
+	factory := informers.NewSharedInformerFactory(k8sClient, resyncPeriod)
+	_, err = factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj any) {
+			newNode, _ := newObj.(*corev1.Node)
+			log.Printf("updating with %v", newNode)
+			// if there's no taints, the node was successfully registered by the ccm
+			if len(newNode.Spec.Taints) == 0 {
+				log.Println("reached 0 taints")
+				cancel()
+			}
+		}})
+	if err != nil {
+		return fmt.Errorf("failed to add node event handler: %w", err)
+	}
+
+	factory.Start(ctx.Done())
+	factory.WaitForCacheSync(ctx.Done())
+	<-ctx.Done()
+	factory.Shutdown()
+
 	return nil
 }
 
@@ -298,8 +350,6 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	if err != nil {
 		return 1, fmt.Errorf("failed to create SSH runner: %w", err)
 	}
-
-	sshFixture = sshRunner
 
 	pub := ssh.MarshalAuthorizedKey(sshRunner.signer.PublicKey())
 	pub = pub[:len(pub)-1] // strip newline
@@ -326,23 +376,26 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	}
 	cpNodeFixture = cpNode
 
-	kf, err := kubeconfig()
+	kubeconfig, cleanup, err := cpNode.kubeconfig()
 	if err != nil {
 		return 1, fmt.Errorf("failed to get kubeconfig: %w", err)
 	}
-	defer kf.Close()
-	defer os.Remove(kf.Name())
+	defer cleanup()
 
-	sf, err := ccmSecret(cfg.apiToken, region, project.ID)
+	err = k8sClient(kubeconfig)
+	if err != nil {
+		return 1, fmt.Errorf("failed to initialize k8s clientset: %w", err)
+	}
+
+	secret, cleanup, err := ccmSecret(cfg.apiToken, region, project.ID)
 	if err != nil {
 		return 1, fmt.Errorf("failed to generate secret for ccm: %w", err)
 	}
-	defer sf.Close()
-	defer os.Remove(sf.Name())
+	defer cleanup()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	runCcm(ctx, kf.Name(), sf.Name())
+	runCcm(ctx, kubeconfig, secret, k8sClientFixture)
 
 	code = m.Run()
 	return code, nil
