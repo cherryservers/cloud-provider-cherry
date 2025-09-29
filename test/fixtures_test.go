@@ -378,15 +378,15 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 
 	// Cancel child process on interrupt/termination.
 	// Should work on Windows as well, see https://pkg.go.dev/os/signal#hdr-Windows.
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		<-ctx.Done()
+		<-sigCtx.Done()
 		cleanup()
 		stop()
 	}()
 
-	ctx, cancel := context.WithCancel(ctx)
+	informerCtx, cancel := context.WithCancel(ctx)
 
 	factory := informers.NewSharedInformerFactory(k8sClient, resyncPeriod)
 	_, err = factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -402,9 +402,9 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 		return nil, fmt.Errorf("failed to add node event handler: %w", err)
 	}
 
-	factory.Start(ctx.Done())
-	factory.WaitForCacheSync(ctx.Done())
-	<-ctx.Done()
+	factory.Start(informerCtx.Done())
+	factory.WaitForCacheSync(informerCtx.Done())
+	<-informerCtx.Done()
 	factory.Shutdown()
 
 	return cleanup, nil
