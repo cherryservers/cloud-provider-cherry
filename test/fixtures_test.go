@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -21,10 +22,14 @@ import (
 	cherrygo "github.com/cherryservers/cherrygo/v3"
 	"golang.org/x/crypto/ssh"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	apiwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/watch"
 )
 
 const (
@@ -39,6 +44,7 @@ const (
 
 var cherryClientFixture *cherrygo.Client
 var k8sClientFixture kubernetes.Interface
+var nodeProvisionerFixture *nodeProvisioner
 var cpNodeFixture *node
 
 type config struct {
@@ -144,6 +150,61 @@ func (n node) runCmd(cmd string) (resp string, err error) {
 		return "", err
 	}
 	return n.cmdRunner.run(ip, cmd)
+}
+
+// join joins newNode to the base node's cluster.
+// Blocks until the node is ready.
+func (n node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface) error {
+	r, err := n.runCmd("microk8s add-node")
+	if err != nil {
+		return fmt.Errorf("couldn't get join URL from control plane node: %w", err)
+	}
+	ip, err := serverPublicIP(n.server)
+	if err != nil {
+		return err
+	}
+
+	// parse the microk8s join invitation response message
+	// looking for public ip
+	joinCmd := ""
+	for line := range strings.Lines(r) {
+		if strings.Contains(line, ip) {
+			joinCmd = line[:len(line)-1] // strip newline
+		}
+	}
+
+	_, err = nn.runCmd(joinCmd)
+	if err != nil {
+		return fmt.Errorf("couldn't execute join cmd: %w", err)
+	}
+
+	return untilNodeReady(ctx, nn, k8sclient)
+}
+
+// untilNodeReady watches the node until an event with ready status.
+func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface) error {
+	lw := cache.NewListWatchFromClient(k8sclient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
+
+	_, err := watch.UntilWithSync(ctx, lw, &corev1.Node{}, nil, func(event apiwatch.Event) (done bool, err error) {
+		node, ok := event.Object.(*corev1.Node)
+		if !ok {
+			return false, fmt.Errorf("unexpected object type: %T", event.Object)
+		}
+		if node.ObjectMeta.Name != n.server.Hostname {
+			return false, nil
+		}
+		for _, c := range node.Status.Conditions {
+			if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to reach joined node state: %w", err)
+	}
+
+	return nil
 }
 
 // kubeconfig generates a kubeconfig file from the node
@@ -388,6 +449,7 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	if err != nil {
 		return 1, fmt.Errorf("failed to provision k8s control plane node: %w", err)
 	}
+	nodeProvisionerFixture = &np
 	cpNodeFixture = cpNode
 
 	kubeconfig, cleanup, err := cpNode.kubeconfig()
@@ -406,7 +468,6 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 		return 1, fmt.Errorf("failed to generate secret for ccm: %w", err)
 	}
 	defer cleanup()
-
 
 	cleanup, err = runCcm(ctx, kubeconfig, secret, k8sClientFixture)
 	if err != nil {
