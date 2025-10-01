@@ -142,6 +142,25 @@ rules:
   - update
   - patch
 - apiGroups:
+  # reason: so ccm can work with metallb CRDs
+  - "metallb.io"
+  resources:
+  - bgppeers
+  - bgppeers/status
+  - bgpadvertisements
+  - bgpadvertisements/status
+  - l2advertisements
+  - l2advertisements/status
+  - ipaddresspools
+  - ipaddresspools/status
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
   # reason: so ccm can read and update events
   - ""
   resources:
