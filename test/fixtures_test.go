@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -33,13 +34,17 @@ import (
 )
 
 const (
-	apiTokenVar  = "CHERRY_TEST_API_TOKEN"
-	teamIDVar    = "CHERRY_TEST_TEAM_ID"
-	serverImage  = "ubuntu_24_04_64bit"
-	serverPlan   = "B1-4-4gb-80s-shared"
-	region       = "LT-Siauliai"
-	userDataPath = "./testdata/cloud-config/init-microk8s.yaml"
-	resyncPeriod = 5 * time.Second
+	apiTokenVar      = "CHERRY_TEST_API_TOKEN"
+	teamIDVar        = "CHERRY_TEST_TEAM_ID"
+	serverImage      = "ubuntu_24_04_64bit"
+	serverPlan       = "B1-4-4gb-80s-shared"
+	region           = "LT-Siauliai"
+	fipTag           = "kubernetes-ccm-test"
+	userDataPath     = "./testdata/cloud-config/init-microk8s.yaml"
+	resyncPeriod     = 5 * time.Second
+	eventTimeout     = 90 * time.Second
+	provisionTimeout = 513 * time.Second
+	joinTimeout      = 210 * time.Second
 )
 
 var cherryClientFixture *cherrygo.Client
@@ -57,7 +62,7 @@ func loadConfig() (config, error) {
 	apiToken := os.Getenv(apiTokenVar)
 	teamID, err := strconv.Atoi(os.Getenv(teamIDVar))
 	if err != nil {
-		return config{}, fmt.Errorf("failed to parse project ID: %w", err)
+		return config{}, fmt.Errorf("failed to parse team ID: %w", err)
 	}
 	return config{apiToken, teamID}, nil
 }
@@ -139,8 +144,9 @@ func newSshCmdRunner() (*sshCmdRunner, error) {
 }
 
 type node struct {
-	server    cherrygo.Server
-	cmdRunner sshCmdRunner
+	server         cherrygo.Server
+	cmdRunner      sshCmdRunner
+	kubeconfigPath string
 }
 
 // runCmd runs a shell command on the node via SSH.
@@ -155,6 +161,9 @@ func (n node) runCmd(cmd string) (resp string, err error) {
 // join joins newNode to the base node's cluster.
 // Blocks until the node is ready.
 func (n node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface) error {
+	ctx, cancel := context.WithTimeoutCause(ctx, joinTimeout, errors.New("node join timeout"))
+	defer cancel()
+
 	r, err := n.runCmd("microk8s add-node")
 	if err != nil {
 		return fmt.Errorf("couldn't get join URL from control plane node: %w", err)
@@ -210,10 +219,11 @@ func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface)
 // kubeconfig generates a kubeconfig file from the node
 // and returns a path to it.
 func (n node) kubeconfig() (path string, cleanup func(), err error) {
-	const cmd = "microk8s config"
-	if err != nil {
-		return "", nil, fmt.Errorf("CP node has no public IP: %w", err)
+	if n.kubeconfigPath != "" {
+		return n.kubeconfigPath, func() {}, nil
 	}
+	const cmd = "microk8s config"
+
 	k, err := n.runCmd(cmd)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to run '%s': %w", cmd, err)
@@ -238,6 +248,7 @@ func (n node) kubeconfig() (path string, cleanup func(), err error) {
 		return "", nil, fmt.Errorf("failed to close kubeconfig file: %w", err)
 	}
 
+	n.kubeconfigPath = path
 	return path, cleanup, nil
 }
 
@@ -249,7 +260,10 @@ type nodeProvisioner struct {
 }
 
 // provision creates a Cherry Servers server and waits for k8s to be running.
-func (np nodeProvisioner) provision() (*node, error) {
+func (np nodeProvisioner) provision(ctx context.Context) (*node, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, provisionTimeout, errors.New("node provision timeout"))
+	defer cancel()
+
 	userDataRaw, err := os.ReadFile(userDataPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read user data file: %w", err)
@@ -268,7 +282,7 @@ func (np nodeProvisioner) provision() (*node, error) {
 		return nil, fmt.Errorf("failed to create server: %w", err)
 	}
 
-	expBackoff(func() (bool, error) {
+	expBackoffWithContext(func() (bool, error) {
 		srv, _, err = np.cherryClient.Servers.Get(srv.ID, nil)
 		if err != nil {
 			return false, fmt.Errorf("failed to get server: %w", err)
@@ -277,21 +291,21 @@ func (np nodeProvisioner) provision() (*node, error) {
 			return true, nil
 		}
 		return false, nil
-	}, defaultExpBackoffConfig())
+	}, defaultExpBackoffConfigWithContext(ctx))
 
 	ip, err := serverPublicIP(srv)
 	if err != nil {
 		return nil, err
 	}
 
-	expBackoff(func() (bool, error) {
+	expBackoffWithContext(func() (bool, error) {
 		// Check if kube-api is reachable. Non-zero exit code will be returned if not.
 		_, err = np.cmdRunner.run(ip, "microk8s kubectl get nodes --no-headers")
 		if err != nil {
 			return false, nil
 		}
 		return true, nil
-	}, defaultExpBackoffConfig())
+	}, defaultExpBackoffConfigWithContext(ctx))
 
 	return &node{srv, np.cmdRunner}, nil
 }
@@ -445,7 +459,7 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	defer cherryClientFixture.Projects.Delete(project.ID)
 
 	np := nodeProvisioner{*cherryClientFixture, project.ID, strconv.Itoa(sshKey.ID), *sshRunner}
-	cpNode, err := np.provision()
+	cpNode, err := np.provision(ctx)
 	if err != nil {
 		return 1, fmt.Errorf("failed to provision k8s control plane node: %w", err)
 	}
@@ -458,7 +472,7 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	}
 	defer cleanup()
 
-	err = k8sClient(kubeconfig)
+	k8sClientFixture, err = k8sClient(kubeconfig)
 	if err != nil {
 		return 1, fmt.Errorf("failed to initialize k8s clientset: %w", err)
 	}

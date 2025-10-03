@@ -2,11 +2,11 @@ package test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +17,9 @@ import (
 )
 
 func untilNodeGone(ctx context.Context, n corev1.Node) error {
+	ctx, cancel := context.WithTimeoutCause(ctx, eventTimeout, errors.New("no node deletion event before timeout"))
+	defer cancel()
+
 	lw := cache.NewListWatchFromClient(k8sClientFixture.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
 
 	_, err := watch.UntilWithSync(ctx, lw, &corev1.Node{}, nil, func(event apiwatch.Event) (done bool, err error) {
@@ -38,11 +41,9 @@ func untilNodeGone(ctx context.Context, n corev1.Node) error {
 // Combining these tests allows us to re-use infrastructure,
 // which reduces test run times.
 func TestNodeAddDelete(t *testing.T) {
-	const timeout = time.Second * 600
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	ctx := t.Context()
 
-	n, err := nodeProvisionerFixture.provision()
+	n, err := nodeProvisionerFixture.provision(ctx)
 	if err != nil {
 		t.Fatalf("failed to provision node: %v", err)
 	}
@@ -102,7 +103,6 @@ func TestNodeAddDelete(t *testing.T) {
 	}
 
 	// node deletion
-	defer cancel()
 	_, _, err = cherryClientFixture.Servers.Delete(n.server.ID)
 	if err != nil {
 		t.Fatalf("failed to delete server: %v", err)

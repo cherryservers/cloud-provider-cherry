@@ -1,37 +1,71 @@
 package test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 )
 
-// start, max and timeout fields are defined in seconds
+type backoffStoppedError struct{}
+
+func (e backoffStoppedError) Error() string {
+	return "exp backoff stopped"
+}
+
 type ExpBackoffConfig struct {
-	start   int
-	exp     int
-	max     int
-	timeout int
+	start time.Duration
+	exp   int
+	max   time.Duration
 }
 
 func defaultExpBackoffConfig() ExpBackoffConfig {
-	return ExpBackoffConfig{start: 2, exp: 2, max: 32, timeout: 513}
+	return ExpBackoffConfig{
+		start: 2 * time.Second,
+		exp:   2,
+		max:   32 * time.Second,
+	}
 }
 
-// backoff until f returns true or non-nil error
-func expBackoff(f func() (bool, error), cfg ExpBackoffConfig) error {
+// expBackoff retries f until it returns true, a non-nil error or
+// stop returns true.
+func expBackoff(f func() (bool, error), cfg ExpBackoffConfig, stop func() bool) error {
 	dur := cfg.start
-	for elapsed := 0; elapsed < cfg.timeout; {
+	for !stop() {
 		r, err := f()
 		if err != nil || r {
 			return err
 		}
-		time.Sleep(time.Duration(dur)*time.Second + time.Duration(rand.Intn(900)+100)*time.Millisecond)
-		elapsed += dur
-		dur *= cfg.exp
+		time.Sleep(dur + time.Duration(rand.Intn(100)+100)*time.Millisecond)
+		dur *= time.Duration(cfg.exp)
 		if dur > cfg.max {
 			dur = cfg.max
 		}
 	}
-	return errors.New("exp backoff timeout")
+	return backoffStoppedError{}
+}
+
+type ExpBackoffConfigWithContext struct {
+	ExpBackoffConfig
+	ctx context.Context
+}
+
+func defaultExpBackoffConfigWithContext(ctx context.Context) ExpBackoffConfigWithContext {
+	return ExpBackoffConfigWithContext{ExpBackoffConfig: defaultExpBackoffConfig(), ctx: ctx}
+}
+
+// expBackoffWithContext wraps expBackoff with a context.
+func expBackoffWithContext(f func() (bool, error), cfg ExpBackoffConfigWithContext) error {
+	err := expBackoff(f, cfg.ExpBackoffConfig, func() bool {
+		return cfg.ctx.Err() != nil
+	})
+	switch {
+	case errors.Is(err, backoffStoppedError{}):
+		return fmt.Errorf("exp backoff context cancelled %w", cfg.ctx.Err())
+	case err != nil:
+		return fmt.Errorf("exp backoff cancelled: %w", err)
+	default:
+		return nil
+	}
 }
