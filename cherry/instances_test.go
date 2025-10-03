@@ -167,7 +167,7 @@ func TestInstanceType(t *testing.T) {
 		{"empty name", "", "", cloudprovider.InstanceNotFound},
 		{"invalid id", "thisdoesnotexist", "", fmt.Errorf("error converting")},
 		{"unknown name", fmt.Sprintf("%d", randomID), "", cloudprovider.InstanceNotFound},
-		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), fmt.Sprintf("%d-%s", server.Plan.ID, server.Plan.Name), nil},
+		{"valid", fmt.Sprintf("cherryservers://%d", server.ID), server.Plan.Slug, nil},
 	}
 
 	for i, tt := range tests {

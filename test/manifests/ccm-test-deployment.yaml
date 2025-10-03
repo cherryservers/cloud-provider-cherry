@@ -1,3 +1,9 @@
+# manifest for deploying the cloud controller manager
+# FROM DEVELOPMENT ONLY!
+# It does not use an image from the registry, but instead
+# runs a simple placeholder image and expects you to replace
+# it with your locally built binary via `kubectl cp`
+# or by using `kubectl exec` to run it directly.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -15,8 +21,6 @@ spec:
     metadata:
       labels:
         app: cloud-provider-cherry
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       dnsPolicy: Default
       hostNetwork: true
@@ -38,15 +42,13 @@ spec:
           effect: NoSchedule
           operator: Exists
       containers:
-      - image: RELEASE_IMG
+      - image: alpine:3.22
         name: cloud-provider-cherry
         imagePullPolicy: Always
         command:
-          - "./cloud-provider-cherry"
-          - "--cloud-provider=cherryservers"
-          - "--leader-elect=false"
-          - "--authentication-skip-lookup=true"
-          - "--cloud-config=/etc/cloud-sa/cloud-sa.json"
+          - sh
+          - -c
+          - "sleep 30d"
         resources:
           requests:
             cpu: 100m

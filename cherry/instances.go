@@ -73,7 +73,7 @@ func (i *instances) InstanceMetadata(_ context.Context, node *v1.Node) (*cloudpr
 	//		must be 63 characters or less (can be empty),
 	//		unless empty, must begin and end with an alphanumeric character ([a-z0-9A-Z]),
 	//		could contain dashes (-), underscores (_), dots (.), and alphanumerics between.
-	p = fmt.Sprintf("%d-%s", server.Plan.ID, strings.ReplaceAll(server.Plan.Name, " ", "-"))
+	p = server.Plan.Slug
 
 	// "A zone represents a logical failure domain"
 	// "A region represents a larger domain, made up of one or more zones"

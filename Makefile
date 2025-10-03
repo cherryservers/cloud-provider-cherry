@@ -109,6 +109,15 @@ test: ## Run unit tests
 race:
 	@$(RACE_CMD) go test -race -short ./...
 
+cherryctl:
+	command -v cherryctl >/dev/null 2>&1 || go install github.com/cherryservers/cherryctl@latest
+
+## Integration tests require a kubeconfig with access to a real cluster
+## and the CHERRY_API_KEY env var set
+## If no kubeconfig is specified, it deploys a cluster for you
+test_integration: cherryctl
+	@./test/test.sh
+
 help: ## Display this help screen
 	@printf "\033[36m%s\n" "For all commands that can be used with one or more OS architecture, set the target architecture with ARCH= and the OS with OS="
 	@printf "\033[36m%s\n" "Supported OS and ARCH are those for GOOS and GOARCH"
@@ -125,7 +134,7 @@ deploy:
 
 
 
-.PHONY: build build-all image deploy ci
+.PHONY: build build-all image deploy ci cherryctl test race test_integration
 
 build-all: $(addprefix sub-build-, $(ARCHES)) ## Build the binaries for all supported ARCH
 sub-build-%:
