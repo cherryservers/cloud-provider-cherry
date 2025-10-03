@@ -77,18 +77,16 @@ func cherryClient(apiToken string) error {
 	return nil
 }
 
-// k8sClient initializes k8s clientset fixture.
-func k8sClient(kubeconfig string) error {
+func k8sClient(kubeconfig string) (*kubernetes.Clientset, error) {
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		return fmt.Errorf("Failed to build k8s config: %w", err)
+		return nil, fmt.Errorf("failed to build k8s config: %w", err)
 	}
 	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		return fmt.Errorf("Failed to build k8s clientset: %w", err)
+		return nil, fmt.Errorf("failed to build k8s clientset: %w", err)
 	}
-	k8sClientFixture = clientset
-	return nil
+	return clientset, nil
 }
 
 type sshCmdRunner struct {
@@ -160,7 +158,7 @@ func (n node) runCmd(cmd string) (resp string, err error) {
 
 // join joins newNode to the base node's cluster.
 // Blocks until the node is ready.
-func (n node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface) error {
+func (n *node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, joinTimeout, errors.New("node join timeout"))
 	defer cancel()
 
@@ -218,7 +216,7 @@ func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface)
 
 // kubeconfig generates a kubeconfig file from the node
 // and returns a path to it.
-func (n node) kubeconfig() (path string, cleanup func(), err error) {
+func (n *node) kubeconfig() (path string, cleanup func(), err error) {
 	if n.kubeconfigPath != "" {
 		return n.kubeconfigPath, func() {}, nil
 	}
