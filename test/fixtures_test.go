@@ -51,6 +51,7 @@ var cherryClientFixture *cherrygo.Client
 var k8sClientFixture kubernetes.Interface
 var nodeProvisionerFixture *nodeProvisioner
 var cpNodeFixture *node
+var fipFixture *cherrygo.IPAddress
 
 type config struct {
 	apiToken string
@@ -188,6 +189,25 @@ func (n *node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface
 	return untilNodeReady(ctx, nn, k8sclient)
 }
 
+// joinMany wraps join to join multiply nodes to the base node
+// in a concurrent manner.
+func (n *node) joinMany(ctx context.Context, nodes []node, k8sclient kubernetes.Interface) []error {
+	errs := make([]error, len(nodes))
+	c := make(chan error, len(nodes))
+
+	for i := range len(nodes) {
+		go func() {
+			c <- n.join(ctx, nodes[i], k8sclient)
+		}()
+	}
+
+	for i := range len(nodes) {
+		errs[i] = <-c
+	}
+	return errs
+}
+
+
 // untilNodeReady watches the node until an event with ready status.
 func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface) error {
 	lw := cache.NewListWatchFromClient(k8sclient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
@@ -305,7 +325,36 @@ func (np nodeProvisioner) provision(ctx context.Context) (*node, error) {
 		return true, nil
 	}, defaultExpBackoffConfigWithContext(ctx))
 
-	return &node{srv, np.cmdRunner}, nil
+	n := node{srv, np.cmdRunner, ""}
+	return &n, nil
+
+}
+
+// provisionMany wraps provision to create n Cherry Servers servers
+// in a concurrent manner.
+func (np nodeProvisioner) provisionMany(ctx context.Context, n int) ([]*node, []error) {
+	type p struct {
+		nn  *node
+		err error
+	}
+
+	nodes := make([]*node, n)
+	errs := make([]error, n)
+	c := make(chan p, n)
+
+	for range n {
+		go func() {
+			nn, err := np.provision(ctx)
+			c <- p{nn: nn, err: err}
+		}()
+	}
+	for i := range n {
+		provisioned := <-c
+		nodes[i] = provisioned.nn
+		errs[i] = provisioned.err
+
+	}
+	return nodes, errs
 }
 
 func serverPublicIP(srv cherrygo.Server) (string, error) {
@@ -331,7 +380,8 @@ func ccmSecret(apiToken, region string, projectID int) (path string, cleanup fun
 		APIKey    string `json:"apiKey"`
 		ProjectID int    `json:"projectId"`
 		Region    string `json:"region,omitempty"`
-	}{apiToken, projectID, region}
+		FIPTag    string `json:"fipTag,omitempty"`
+	}{apiToken, projectID, region, fipTag}
 
 	data, err := json.Marshal(s)
 	if err != nil {
@@ -367,7 +417,7 @@ func ccmSecret(apiToken, region string, projectID int) (path string, cleanup fun
 func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes.Interface) (cleanup func(), err error) {
 	cmd := exec.CommandContext(ctx, "go", "run", "..", "--cloud-provider=cherryservers",
 		"--leader-elect=false", "--authentication-skip-lookup=true",
-		"--kubeconfig="+kubeconfig, "--cloud-config="+secret)
+		"--kubeconfig="+kubeconfig, "--cloud-config="+secret, "--v=2")
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		log.Println("failed to create stderr pipe for ccm process")
@@ -454,7 +504,7 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	if err != nil {
 		return 1, fmt.Errorf("failed to create project: %w", err)
 	}
-	defer cherryClientFixture.Projects.Delete(project.ID)
+	//defer cherryClientFixture.Projects.Delete(project.ID)
 
 	np := nodeProvisioner{*cherryClientFixture, project.ID, strconv.Itoa(sshKey.ID), *sshRunner}
 	cpNode, err := np.provision(ctx)
@@ -474,6 +524,14 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	if err != nil {
 		return 1, fmt.Errorf("failed to initialize k8s clientset: %w", err)
 	}
+
+	tags := map[string]string{fipTag: ""}
+	fip, _, err := cherryClientFixture.IPAddresses.Create(
+		project.ID, &cherrygo.CreateIPAddress{Region: region, Tags: &tags})
+	if err != nil {
+		return 1, fmt.Errorf("failed to create fip: %w", err)
+	}
+	fipFixture = &fip
 
 	secret, cleanup, err := ccmSecret(cfg.apiToken, region, project.ID)
 	if err != nil {
