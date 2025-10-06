@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/cherryservers/cherrygo/v3"
@@ -63,6 +64,20 @@ func TestControlPlaneFip(t *testing.T) {
 		t.Fatalf("fip target: %q, want %q", fip.TargetedTo.Hostname, cpNodeFixture.server.Hostname)
 	}
 
-	//test that fip is reattached when a cp node is disabled
+	// test that fip is reattached when a cp node is disabled
+
+	// disabling the cp node fixture is tricky, since it's used for other tests,
+	// so we re-target the fip to the other node.
+	cherryClientFixture.IPAddresses.Update(fipFixture.ID, &cherrygo.UpdateIPAddress{TargetedTo: strconv.Itoa(cp2.server.ID)})
+
+	err = cpNodeFixture.remove(ctx, &cp2)
+	if err != nil {
+		t.Fatalf("couldn't remove node from cluster: %v", err)
+	}
+
+	untilIpHasTarget(ctx, *fipFixture, fipFixture.ID)
+	if err != nil {
+		t.Fatalf("fip didn't get attached to cp node: %v", err)
+	}
 
 }
