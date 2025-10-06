@@ -186,6 +186,7 @@ func (n *node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface
 		return fmt.Errorf("couldn't execute join cmd: %w", err)
 	}
 
+	nn.addCpLabel(ctx)
 	return untilNodeReady(ctx, nn, k8sclient)
 }
 
@@ -206,7 +207,6 @@ func (n *node) joinMany(ctx context.Context, nodes []node, k8sclient kubernetes.
 	}
 	return errs
 }
-
 
 // untilNodeReady watches the node until an event with ready status.
 func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface) error {
@@ -270,6 +270,22 @@ func (n *node) kubeconfig() (path string, cleanup func(), err error) {
 	return path, cleanup, nil
 }
 
+// addCpLabel adds the well-known control plane label
+// to the node, since microk8s doesn't use it,
+// but we need it for fip reconciliation.
+func (n *node) addCpLabel(ctx context.Context) error {
+	ctx, cancel := context.WithTimeoutCause(ctx, 64*time.Second, fmt.Errorf("timed out on label apply for %s", n.server.Hostname))
+	defer cancel()
+
+	return expBackoffWithContext(func() (bool, error) {
+		_, err := n.runCmd("microk8s kubectl label nodes " + n.server.Hostname + " node-role.kubernetes.io/control-plane=\"\"")
+		if err != nil {
+			return false, nil
+		}
+		return true, nil
+	}, defaultExpBackoffConfigWithContext(ctx))
+}
+
 type nodeProvisioner struct {
 	cherryClient cherrygo.Client
 	projectID    int
@@ -326,6 +342,7 @@ func (np nodeProvisioner) provision(ctx context.Context) (*node, error) {
 	}, defaultExpBackoffConfigWithContext(ctx))
 
 	n := node{srv, np.cmdRunner, ""}
+	n.addCpLabel(ctx)
 	return &n, nil
 
 }
