@@ -208,6 +208,15 @@ func (n *node) joinMany(ctx context.Context, nodes []node, k8sclient kubernetes.
 	return errs
 }
 
+// remove removes the provided node from the base node.
+func (n *node) remove(ctx context.Context, nn *node) error {
+	resp, err := n.runCmd("microk8s remove-node " + nn.server.Hostname + " --force")
+	if err != nil {
+		return fmt.Errorf("failed to remove node: %v: %s", err, resp)
+	}
+	return nil
+}
+
 // untilNodeReady watches the node until an event with ready status.
 func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface) error {
 	lw := cache.NewListWatchFromClient(k8sclient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
