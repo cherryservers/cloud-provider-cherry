@@ -401,13 +401,14 @@ func fileCleanup(path string) func() {
 
 // ccmSecret generates the secret required for CCM deployment
 // and returns a path to a temp file with it.
-func ccmSecret(apiToken, region string, projectID int) (path string, cleanup func(), err error) {
+func ccmSecret(apiToken, region, fipTag, loadBalancer string, projectID int) (path string, cleanup func(), err error) {
 	s := struct {
 		APIKey    string `json:"apiKey"`
 		ProjectID int    `json:"projectId"`
 		Region    string `json:"region,omitempty"`
 		FIPTag    string `json:"fipTag,omitempty"`
-	}{apiToken, projectID, region, fipTag}
+		LoadBalancer string `json:"loadbalancer,omitempty"`
+	}{apiToken, projectID, region, fipTag, loadBalancer}
 
 	data, err := json.Marshal(s)
 	if err != nil {
@@ -559,7 +560,7 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	}
 	fipFixture = &fip
 
-	secret, cleanup, err := ccmSecret(cfg.apiToken, region, project.ID)
+	secret, cleanup, err := ccmSecret(cfg.apiToken, region, fipTag, "", project.ID)
 	if err != nil {
 		return 1, fmt.Errorf("failed to generate secret for ccm: %w", err)
 	}
