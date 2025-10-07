@@ -52,6 +52,7 @@ var k8sClientFixture kubernetes.Interface
 var nodeProvisionerFixture *nodeProvisioner
 var cpNodeFixture *node
 var fipFixture *cherrygo.IPAddress
+var teamIDFixture *int
 
 type config struct {
 	apiToken string
@@ -302,6 +303,10 @@ type nodeProvisioner struct {
 	cmdRunner    sshCmdRunner
 }
 
+func newNodeProvisioner(client cherrygo.Client, projectID int, sshKeyID string, cmdRunner sshCmdRunner) nodeProvisioner {
+	return nodeProvisioner{client, projectID, sshKeyID, cmdRunner}
+}
+
 // provision creates a Cherry Servers server and waits for k8s to be running.
 func (np nodeProvisioner) provision(ctx context.Context) (*node, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, provisionTimeout, errors.New("node provision timeout"))
@@ -504,6 +509,7 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	if err != nil {
 		return 1, fmt.Errorf("failed to load test config: %w", err)
 	}
+	teamIDFixture = &cfg.teamID
 
 	err = cherryClient(cfg.apiToken)
 	if err != nil {
@@ -533,7 +539,7 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	}
 	//defer cherryClientFixture.Projects.Delete(project.ID)
 
-	np := nodeProvisioner{*cherryClientFixture, project.ID, strconv.Itoa(sshKey.ID), *sshRunner}
+	np := newNodeProvisioner(*cherryClientFixture, project.ID, strconv.Itoa(sshKey.ID), *sshRunner)
 	cpNode, err := np.provision(ctx)
 	if err != nil {
 		return 1, fmt.Errorf("failed to provision k8s control plane node: %w", err)
