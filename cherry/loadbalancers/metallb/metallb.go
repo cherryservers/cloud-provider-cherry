@@ -20,7 +20,6 @@ const (
 	serviceNameKey      = "nomatch.cherryservers.com/service-name"
 	serviceNameSpaceKey = "nomatch.cherryservers.com/service-namespace"
 	defaultNamespace    = "metallb-system"
-	defaultName         = "config"
 )
 
 type Configurer interface {
@@ -63,18 +62,12 @@ type LB struct {
 // In theory, we should be able to get the client we need of type "sigs.k8s.io/controller-runtime/pkg/client"
 // from the k8sclient; for the future.
 func NewLB(_ kubernetes.Interface, config string) *LB {
-	var namespace, configmapname string
-	// it may have an extra slash at the beginning or end, so get rid of it
+	// may have an extra slash at the beginning or end, so get rid of it
 	config = strings.TrimPrefix(config, "/")
 	config = strings.TrimSuffix(config, "/")
-	cmparts := strings.SplitN(config, "/", 2)
-	if len(cmparts) >= 2 {
-		namespace, configmapname = cmparts[0], cmparts[1]
-	}
-	// defaults
-	if configmapname == "" {
-		configmapname = defaultName
-	}
+	namespace := config
+
+	// default
 	if namespace == "" {
 		namespace = defaultNamespace
 	}
