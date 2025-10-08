@@ -34,17 +34,18 @@ import (
 )
 
 const (
-	apiTokenVar      = "CHERRY_TEST_API_TOKEN"
-	teamIDVar        = "CHERRY_TEST_TEAM_ID"
-	serverImage      = "ubuntu_24_04_64bit"
-	serverPlan       = "B1-4-4gb-80s-shared"
-	region           = "LT-Siauliai"
-	fipTag           = "kubernetes-ccm-test"
-	userDataPath     = "./testdata/cloud-config/init-microk8s.yaml"
-	resyncPeriod     = 5 * time.Second
-	eventTimeout     = 90 * time.Second
-	provisionTimeout = 513 * time.Second
-	joinTimeout      = 210 * time.Second
+	apiTokenVar           = "CHERRY_TEST_API_TOKEN"
+	teamIDVar             = "CHERRY_TEST_TEAM_ID"
+	serverImage           = "ubuntu_24_04_64bit"
+	serverPlan            = "B1-4-4gb-80s-shared"
+	region                = "LT-Siauliai"
+	fipTag                = "kubernetes-ccm-test"
+	userDataPath          = "./testdata/cloud-config/init-microk8s.yaml"
+	resyncPeriod          = 5 * time.Second
+	eventTimeout          = 90 * time.Second
+	provisionTimeout      = 513 * time.Second
+	joinTimeout           = 210 * time.Second
+	controlPlaneNodeLabel = "node-role.kubernetes.io/control-plane"
 )
 
 var cherryClientFixture *cherrygo.Client
@@ -288,7 +289,8 @@ func (n *node) addCpLabel(ctx context.Context) error {
 	defer cancel()
 
 	return expBackoffWithContext(func() (bool, error) {
-		_, err := n.runCmd("microk8s kubectl label nodes " + n.server.Hostname + " node-role.kubernetes.io/control-plane=\"\"")
+		_, err := n.runCmd("microk8s kubectl label nodes " + n.server.Hostname +
+			" " + controlPlaneNodeLabel + "=\"\"")
 		if err != nil {
 			return false, nil
 		}
@@ -408,10 +410,10 @@ func fileCleanup(path string) func() {
 // and returns a path to a temp file with it.
 func ccmSecret(apiToken, region, fipTag, loadBalancer string, projectID int) (path string, cleanup func(), err error) {
 	s := struct {
-		APIKey    string `json:"apiKey"`
-		ProjectID int    `json:"projectId"`
-		Region    string `json:"region,omitempty"`
-		FIPTag    string `json:"fipTag,omitempty"`
+		APIKey       string `json:"apiKey"`
+		ProjectID    int    `json:"projectId"`
+		Region       string `json:"region,omitempty"`
+		FIPTag       string `json:"fipTag,omitempty"`
 		LoadBalancer string `json:"loadbalancer,omitempty"`
 	}{apiToken, projectID, region, fipTag, loadBalancer}
 
