@@ -21,6 +21,7 @@ import (
 	"time"
 
 	cherrygo "github.com/cherryservers/cherrygo/v3"
+	ccm "github.com/cherryservers/cloud-provider-cherry/cherry"
 	"golang.org/x/crypto/ssh"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -408,16 +409,8 @@ func fileCleanup(path string) func() {
 
 // ccmSecret generates the secret required for CCM deployment
 // and returns a path to a temp file with it.
-func ccmSecret(apiToken, region, fipTag, loadBalancer string, projectID int) (path string, cleanup func(), err error) {
-	s := struct {
-		APIKey       string `json:"apiKey"`
-		ProjectID    int    `json:"projectId"`
-		Region       string `json:"region,omitempty"`
-		FIPTag       string `json:"fipTag,omitempty"`
-		LoadBalancer string `json:"loadbalancer,omitempty"`
-	}{apiToken, projectID, region, fipTag, loadBalancer}
-
-	data, err := json.Marshal(s)
+func ccmSecret(cfg ccm.Config) (path string, cleanup func(), err error) {
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to marshall secret to json: %w", err)
 	}
@@ -446,9 +439,9 @@ func ccmSecret(apiToken, region, fipTag, loadBalancer string, projectID int) (pa
 }
 
 // runCcm runs the CCM using the go toolchain as a child process.
-// This child process is cancelled on interrupt or termination,
-// but the caller is responsible for cleanup in normal program flow.
-func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes.Interface) (cleanup func(), err error) {
+// The child process is cancelled when the context is cancelled,
+// but has a teardown process, which is done when `stopped` is closed.
+func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes.Interface) (stopped <-chan struct{}, err error) {
 	cmd := exec.CommandContext(ctx, "go", "run", "..", "--cloud-provider=cherryservers",
 		"--leader-elect=false", "--authentication-skip-lookup=true",
 		"--kubeconfig="+kubeconfig, "--cloud-config="+secret, "--v=2")
@@ -456,9 +449,7 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 	if err != nil {
 		log.Println("failed to create stderr pipe for ccm process")
 	} else {
-		go func() {
-			io.Copy(log.Writer(), stderr)
-		}()
+		go io.Copy(log.Writer(), stderr)
 	}
 
 	err = cmd.Start()
@@ -467,19 +458,12 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 	}
 	log.Printf("ccm pid: %d\n", cmd.Process.Pid)
 
-	cleanup = func() {
-		cmd.Cancel()
-		cmd.Wait()
-	}
-
-	// Cancel child process on interrupt/termination.
-	// Should work on Windows as well, see https://pkg.go.dev/os/signal#hdr-Windows.
-	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-
+	// Ensure graceful exit on teardown.
+	stoppedCh := make(chan struct{})
 	go func() {
-		<-sigCtx.Done()
-		cleanup()
-		stop()
+		<-ctx.Done()
+		cmd.Wait()
+		close(stoppedCh)
 	}()
 
 	informerCtx, cancel := context.WithCancel(ctx)
@@ -495,7 +479,7 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 			}
 		}})
 	if err != nil {
-		return nil, fmt.Errorf("failed to add node event handler: %w", err)
+		return stoppedCh, fmt.Errorf("failed to add node event handler: %w", err)
 	}
 
 	factory.Start(informerCtx.Done())
@@ -503,7 +487,7 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 	<-informerCtx.Done()
 	factory.Shutdown()
 
-	return cleanup, nil
+	return stoppedCh, nil
 }
 
 func runMain(ctx context.Context, m *testing.M) (code int, err error) {
@@ -568,17 +552,24 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	}
 	fipFixture = &fip
 
-	secret, cleanup, err := ccmSecret(cfg.apiToken, region, fipTag, "", project.ID)
+	secret, cleanup, err := ccmSecret(ccm.Config{
+		AuthToken: cfg.apiToken, Region: region, FIPTag: fipTag, ProjectID: project.ID,
+	})
 	if err != nil {
 		return 1, fmt.Errorf("failed to generate secret for ccm: %w", err)
 	}
 	defer cleanup()
 
-	cleanup, err = runCcm(ctx, kubeconfig, secret, k8sClientFixture)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+
+	stoppedCh, err := runCcm(ctx, kubeconfig, secret, k8sClientFixture)
 	if err != nil {
 		return 1, fmt.Errorf("failed to start ccm: %w", err)
 	}
-	defer cleanup()
+	go func(){
+		<-stoppedCh
+		stop()
+	}()
 
 	code = m.Run()
 	return code, nil
