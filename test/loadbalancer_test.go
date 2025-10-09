@@ -3,38 +3,38 @@ package test
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"testing"
 
 	"github.com/cherryservers/cherrygo/v3"
+	ccm "github.com/cherryservers/cloud-provider-cherry/cherry"
 	"golang.org/x/crypto/ssh"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
-func TestKubeVip(t *testing.T) {
-	// Things we need to do:
-	// 1. Create a project(k disabled, to test BGP enabler).
-	// 2. Create a local SSH key signer.
-	// 3. Create a SSH key on Cherry Servers.
-	// 4. Create a server on Cherry Servers.
-	// 5. Ensure K8S is running on our server.
-	// 6. Deploy kube-vip on our server/node.
-	// 7. Start the CCM locally.
-	// 8. ***Do the tests***
-
-	// Create a project:
-	const testName = "kubernetes-ccm-test-lb-kube-vip"
-	ctx := t.Context()
+func setupProject(t testing.TB, name string) cherrygo.Project {
+	t.Helper()
 
 	project, _, err := cherryClientFixture.Projects.Create(*teamIDFixture, &cherrygo.CreateProject{
-		Name: testName})
+		Name: name})
 	if err != nil {
-		t.Fatalf("failed to create project: %v", err)
+		t.Fatalf("failed to setup cherry servers project: %v", err)
 	}
-	// defer cherryClientFixture.Projects.Delete(project.ID)
+	t.Cleanup(func() {
+		cherryClientFixture.Projects.Delete(project.ID)
+	})
+	return project
+}
+
+func setupNodeProvisioner(t testing.TB, testName string, projectID int) nodeProvisioner {
+	t.Helper()
 
 	// Create a SSH key signer:
 	sshRunner, err := newSshCmdRunner()
@@ -52,51 +52,132 @@ func TestKubeVip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create SSH key on cherry servers: %v", err)
 	}
-	defer cherryClientFixture.SSHKeys.Delete(sshKey.ID)
+	t.Cleanup(func() {
+		cherryClientFixture.SSHKeys.Delete(sshKey.ID)
+	})
+	return nodeProvisioner{
+		cherryClient: *cherryClientFixture,
+		projectID:    projectID,
+		sshKeyID:     strconv.Itoa(sshKey.ID),
+		cmdRunner:    *sshRunner,
+	}
+}
 
-	np := newNodeProvisioner(*cherryClientFixture, project.ID, strconv.Itoa(sshKey.ID), *sshRunner)
+func setupKubeConfig(t testing.TB, n node) string {
+	t.Helper()
+
+	cfg, cleanup, err := n.kubeconfig()
+	if err != nil {
+		t.Fatalf("failed to generate kubeconfig: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanup()
+	})
+	return cfg
+}
+
+func setupCcmSecret(t testing.TB, ccmCfg ccm.Config) string {
+	t.Helper()
+
+	secret, cleanup, err := ccmSecret(ccmCfg)
+	if err != nil {
+		t.Fatalf("failed to setup ccm secret config")
+	}
+	t.Cleanup(func() {
+		cleanup()
+	})
+	return secret
+}
+
+type testEnv struct {
+	project         cherrygo.Project
+	nodeProvisioner nodeProvisioner
+	mainNode        node
+	kubeconfig      string // path
+	k8sClient       kubernetes.Interface
+}
+
+type testEnvConfig struct {
+	name         string
+	loadBalancer string // optional
+	fipTag       string // optional
+}
+
+func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv {
+	t.Helper()
+
+	// Setup project:
+	project := setupProject(t, cfg.name)
+
+	// Setup node provisioner:
+	np := setupNodeProvisioner(t, cfg.name, project.ID)
 
 	// Create a node (server with k8s running):
-	node, err := np.provision(ctx)
+	node, err := np.provision(t.Context())
 	if err != nil {
 		t.Fatalf("failed to provision test node: %v", err)
 	}
 
-	// Generate client for node's kube-api:
-	cfg, cleanup, err := node.kubeconfig()
-	if err != nil {
-		t.Fatalf("failed to generate node kubeconfig: %v", err)
-	}
-	defer cleanup()
+	// Get node kubeconfig:
+	kubeCfg := setupKubeConfig(t, *node)
 
-	client, err := k8sClient(cfg)
+	client, err := k8sClient(kubeCfg)
 	if err != nil {
 		t.Fatalf("failed to create k8s client: %v", err)
 	}
 
 	// Generate config secret for CCM:
-	secret, cleanup, err := ccmSecret(cherryClientFixture.AuthToken, region, "", "kube-vip://", project.ID)
-	if err != nil {
-		t.Fatalf("failed to create config secret for ccm: %v", err)
-	}
-	defer cleanup()
+	secret := setupCcmSecret(t, ccm.Config{
+		AuthToken:           cherryClientFixture.AuthToken,
+		Region:              region,
+		LoadBalancerSetting: cfg.loadBalancer,
+		FIPTag:              cfg.fipTag,
+		ProjectID:           project.ID})
+
+	// Cancel child process on interrupt/termination.
+	// Should work on Windows as well, see https://pkg.go.dev/os/signal#hdr-Windows.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 
 	// Launch CCM:
-	runCcm(ctx, cfg, secret, client)
+	stopped, err := runCcm(ctx, kubeCfg, secret, client)
+	if err != nil {
+		t.Fatalf("failed to run CCM: %v", err)
+	}
+	// Stop signal diversion when CCM is stopped.
+	go func (){
+		<-stopped
+		stop()
+	}()
+	t.Cleanup(func () {
+		<-stopped
+	})
 
+	return &testEnv{
+		project:         project,
+		nodeProvisioner: np,
+		mainNode:        *node,
+		kubeconfig:      kubeCfg,
+		k8sClient:       client,
+	}
+}
+
+// Ensures project has non-zero ASN.
+func ensureProjectAsn(ctx context.Context, t testing.TB, project *cherrygo.Project, projectServer cherrygo.Server) {
 	// We need a local ASN to deploy kube-vip, but
 	// cherry servers only assigns a local ASN
 	// to a project once there's a server with BGP enabled.
 	// Since the LB controller is supposed to enable BGP on a per-node basis,
 	// we enable BGP on the node, get our ASN, and then disable it, so
 	// that the enabler can be tested.
-	_, _, err = cherryClientFixture.Servers.Update(node.server.ID, &cherrygo.UpdateServer{Bgp: true})
+	t.Helper()
+
+	_, _, err := cherryClientFixture.Servers.Update(projectServer.ID, &cherrygo.UpdateServer{Bgp: true})
 	if err != nil {
-		t.Fatalf("failed to enable bgp on server %q: %v", node.server.Hostname, err)
+		t.Fatalf("failed to enable bgp on server %q: %v", projectServer.Hostname, err)
 	}
 
 	err = expBackoffWithContext(func() (bool, error) {
-		project, _, err = cherryClientFixture.Projects.Get(project.ID, nil)
+		*project, _, err = cherryClientFixture.Projects.Get(project.ID, nil)
 		if err != nil {
 			return false, fmt.Errorf("failed to get project: %w", err)
 		}
@@ -104,39 +185,33 @@ func TestKubeVip(t *testing.T) {
 			return false, nil
 		}
 		return true, nil
-	}, defaultExpBackoffConfigWithContext(context.TODO()))
+	}, defaultExpBackoffConfigWithContext(ctx))
 	if err != nil {
 		t.Fatalf("couldn't establish project asn: %v", err)
 	}
 
-	_, _, err = cherryClientFixture.Servers.Update(node.server.ID, &cherrygo.UpdateServer{Bgp: false})
+	_, _, err = cherryClientFixture.Servers.Update(projectServer.ID, &cherrygo.UpdateServer{Bgp: false})
 	if err != nil {
-		t.Fatalf("failed to disable bgp on server %q: %v", node.server.Hostname, err)
+		t.Fatalf("failed to disable bgp on server %q: %v", projectServer.Hostname, err)
 	}
-	project, _, err = cherryClientFixture.Projects.Get(project.ID, nil)
+	*project, _, err = cherryClientFixture.Projects.Get(project.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to get project: %v", err)
 	}
+}
 
-	// Deploy kube-vip:
+func setupKubeVipRbac(ctx context.Context, t testing.TB, namespace string, client kubernetes.Interface) (saName string) {
+	t.Helper()
+
 	const kubeVipSaName = "kube-vip"
-	const kubeVipName = "kube-vip-ds"
-	const kubeVipVersion = "v1.0.1"
-	const nameLabel = "app.kubernetes.io/name"
-	const versionLabel = "app.kubernetes.io/version"
-	const kubeVipNamespace = metav1.NamespaceSystem
-	ServerPubIP, err := serverPublicIP(node.server)
-	if err != nil {
-		t.Fatal(err.Error())
-	}
 
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      kubeVipSaName,
-			Namespace: kubeVipNamespace,
+			Namespace: namespace,
 		},
 	}
-	_, err = client.CoreV1().ServiceAccounts(kubeVipNamespace).Create(context.TODO(), sa, metav1.CreateOptions{})
+	_, err := client.CoreV1().ServiceAccounts(namespace).Create(ctx, sa, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to deploy kube-vip service account: %v", err)
 	}
@@ -158,7 +233,7 @@ func TestKubeVip(t *testing.T) {
 		},
 	}
 
-	_, err = client.RbacV1().ClusterRoles().Create(context.TODO(), cr, metav1.CreateOptions{})
+	_, err = client.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to deploy kube-vip cluster role: %v", err)
 	}
@@ -176,31 +251,52 @@ func TestKubeVip(t *testing.T) {
 			{
 				Kind:      "ServiceAccount",
 				Name:      kubeVipSaName,
-				Namespace: kubeVipNamespace,
+				Namespace: namespace,
 			},
 		},
 	}
 
-	_, err = client.RbacV1().ClusterRoleBindings().Create(context.TODO(), crb, metav1.CreateOptions{})
+	_, err = client.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to deploy kube-vip role binding: %v", err)
 	}
 
+	return kubeVipSaName
+}
+
+type kubeVipConfig struct {
+	localAsn    string
+	peerAsn     string
+	peerAddress string
+	routerID    string
+}
+
+func setupKubeVip(ctx context.Context, t testing.TB, client kubernetes.Interface, cfg kubeVipConfig) {
+	t.Helper()
+
+	const name = "kube-vip-ds"
+	const version = "v1.0.1"
+	const nameLabel = "app.kubernetes.io/name"
+	const versionLabel = "app.kubernetes.io/version"
+	const namespace = metav1.NamespaceSystem
+
+	saName := setupKubeVipRbac(ctx, t, namespace, client)
+
 	kubeVipDaemonSet := appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:    map[string]string{nameLabel: kubeVipName, versionLabel: kubeVipVersion},
-			Name:      kubeVipName,
-			Namespace: kubeVipNamespace,
+			Labels:    map[string]string{nameLabel: name, versionLabel: version},
+			Name:      name,
+			Namespace: namespace,
 		},
 		Spec: appsv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{nameLabel: kubeVipName},
+				MatchLabels: map[string]string{nameLabel: name},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels:    map[string]string{nameLabel: kubeVipName, versionLabel: kubeVipVersion},
-					Name:      kubeVipName,
-					Namespace: kubeVipNamespace,
+					Labels:    map[string]string{nameLabel: name, versionLabel: version},
+					Name:      name,
+					Namespace: namespace,
 				},
 				Spec: corev1.PodSpec{
 					Affinity: &corev1.Affinity{
@@ -261,18 +357,18 @@ func TestKubeVip(t *testing.T) {
 								},
 								{
 									Name:  "bgp_as",
-									Value: strconv.Itoa(project.Bgp.LocalASN),
+									Value: cfg.localAsn,
 								},
 								{
 									Name:  "bgp_peeraddress",
-									Value: node.server.Region.BGP.Hosts[0],
+									Value: cfg.peerAddress,
 								},
 								{
 									Name: "bgp_peerpass",
 								},
 								{
 									Name:  "bgp_peeras",
-									Value: strconv.Itoa(node.server.Region.BGP.Asn),
+									Value: cfg.peerAsn,
 								},
 								{
 									Name: "vip_address",
@@ -283,7 +379,7 @@ func TestKubeVip(t *testing.T) {
 								},
 								{
 									Name:  "bgp_routerid",
-									Value: ServerPubIP,
+									Value: cfg.routerID,
 								},
 							},
 							Image:           "ghcr.io/kube-vip/kube-vip:v1.0.1",
@@ -303,7 +399,7 @@ func TestKubeVip(t *testing.T) {
 						},
 					},
 					HostNetwork:        true,
-					ServiceAccountName: kubeVipSaName,
+					ServiceAccountName: saName,
 					Tolerations: []corev1.Toleration{
 						{
 							Effect:   corev1.TaintEffectNoSchedule,
@@ -319,9 +415,28 @@ func TestKubeVip(t *testing.T) {
 		},
 	}
 
-	_, err = client.AppsV1().DaemonSets(kubeVipNamespace).Create(context.TODO(), &kubeVipDaemonSet, metav1.CreateOptions{})
+	_, err := client.AppsV1().DaemonSets(namespace).Create(ctx, &kubeVipDaemonSet, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to deploy kube-vip DaemonSet: %v", err)
 	}
+}
+
+func TestKubeVip(t *testing.T) {
+	const testName = "kubernetes-ccm-test-lb-kube-vip"
+	ctx := t.Context()
+
+	env := setupTestEnv(ctx, t, testEnvConfig{
+		name: testName, loadBalancer: "kube-vip://",
+	})
+
+	// We need a local ASN to deploy kube-vip.
+	ensureProjectAsn(ctx, t, &env.project, env.mainNode.server)
+
+	setupKubeVip(ctx, t, env.k8sClient, kubeVipConfig{
+		localAsn:    strconv.Itoa(env.project.Bgp.LocalASN),
+		peerAsn:     strconv.Itoa(env.mainNode.server.Region.BGP.Asn),
+		peerAddress: env.mainNode.server.Region.BGP.Hosts[0],
+		routerID:    env.mainNode.server.IPAddresses[0].Address,
+	})
 
 }
