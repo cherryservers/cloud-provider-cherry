@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -421,6 +422,80 @@ func setupKubeVip(ctx context.Context, t testing.TB, client kubernetes.Interface
 	}
 }
 
+func setupNginx(ctx context.Context, t testing.TB, client kubernetes.Interface, namespace string) *appsv1.Deployment {
+	t.Helper()
+	replicas := int32(2)
+
+	deployment := appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "nginx-deployment",
+			Labels: map[string]string{"app": "nginx"},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "nginx"},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "nginx"},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "nginx",
+							Image: "nginx:1.29.2",
+							Ports: []corev1.ContainerPort{
+								{
+									ContainerPort: 80,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	deployed, err := client.AppsV1().Deployments(namespace).Create(
+		ctx, &deployment, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to deploy nginx: %v", err)
+	}
+
+	return deployed
+}
+
+type loadBalancerConfig struct {
+	name string
+	namespace string
+	selector map[string]string
+}
+
+func setupLoadBalancer(ctx context.Context, t testing.TB, client kubernetes.Interface, cfg loadBalancerConfig) *corev1.Service {
+	lb := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: cfg.name,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: cfg.selector,
+			Ports: []corev1.ServicePort{
+				{
+					Port: 8765,
+					TargetPort: intstr.FromInt(9376),
+				},
+			},
+			Type: corev1.ServiceTypeLoadBalancer,
+		},
+	}
+
+	deployed, err := client.CoreV1().Services(cfg.namespace).Create(ctx, &lb, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to setup load balancer %q: %v", cfg.name, err)
+	}
+	return deployed
+}
+
 func TestKubeVip(t *testing.T) {
 	const testName = "kubernetes-ccm-test-lb-kube-vip"
 	ctx := t.Context()
@@ -437,6 +512,23 @@ func TestKubeVip(t *testing.T) {
 		peerAsn:     strconv.Itoa(env.mainNode.server.Region.BGP.Asn),
 		peerAddress: env.mainNode.server.Region.BGP.Hosts[0],
 		routerID:    env.mainNode.server.IPAddresses[0].Address,
+	})
+
+	const namespace = metav1.NamespaceDefault
+
+	testDeployment := setupNginx(ctx, t, env.k8sClient, namespace)
+	selector := testDeployment.Spec.Selector.MatchLabels
+
+	setupLoadBalancer(ctx, t, env.k8sClient, loadBalancerConfig{
+		name: "example-service-1",
+		namespace: namespace,
+		selector: selector,
+	})
+
+	setupLoadBalancer(ctx, t, env.k8sClient, loadBalancerConfig{
+		name: "example-service-2",
+		namespace: namespace,
+		selector: selector,
 	})
 
 }
