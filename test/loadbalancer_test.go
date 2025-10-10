@@ -145,11 +145,11 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 		t.Fatalf("failed to run CCM: %v", err)
 	}
 	// Stop signal diversion when CCM is stopped.
-	go func (){
+	go func() {
 		<-stopped
 		stop()
 	}()
-	t.Cleanup(func () {
+	t.Cleanup(func() {
 		<-stopped
 	})
 
@@ -201,8 +201,13 @@ func ensureProjectAsn(ctx context.Context, t testing.TB, project *cherrygo.Proje
 	}
 }
 
-func setupKubeVipRbac(ctx context.Context, t testing.TB, namespace string, client kubernetes.Interface) (saName string) {
-	t.Helper()
+type kubeObjectHelpers struct {
+	t testing.TB
+	client kubernetes.Interface
+}
+
+func(k *kubeObjectHelpers) setupKubeVipRbac(ctx context.Context, namespace string) (saName string) {
+	k.t.Helper()
 
 	const kubeVipSaName = "kube-vip"
 
@@ -212,9 +217,9 @@ func setupKubeVipRbac(ctx context.Context, t testing.TB, namespace string, clien
 			Namespace: namespace,
 		},
 	}
-	_, err := client.CoreV1().ServiceAccounts(namespace).Create(ctx, sa, metav1.CreateOptions{})
+	_, err := k.client.CoreV1().ServiceAccounts(namespace).Create(ctx, sa, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("failed to deploy kube-vip service account: %v", err)
+		k.t.Fatalf("failed to deploy kube-vip service account: %v", err)
 	}
 
 	cr := &rbacv1.ClusterRole{
@@ -234,9 +239,9 @@ func setupKubeVipRbac(ctx context.Context, t testing.TB, namespace string, clien
 		},
 	}
 
-	_, err = client.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
+	_, err = k.client.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("failed to deploy kube-vip cluster role: %v", err)
+		k.t.Fatalf("failed to deploy kube-vip cluster role: %v", err)
 	}
 
 	crb := &rbacv1.ClusterRoleBinding{
@@ -257,9 +262,9 @@ func setupKubeVipRbac(ctx context.Context, t testing.TB, namespace string, clien
 		},
 	}
 
-	_, err = client.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
+	_, err = k.client.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("failed to deploy kube-vip role binding: %v", err)
+		k.t.Fatalf("failed to deploy kube-vip role binding: %v", err)
 	}
 
 	return kubeVipSaName
@@ -272,8 +277,8 @@ type kubeVipConfig struct {
 	routerID    string
 }
 
-func setupKubeVip(ctx context.Context, t testing.TB, client kubernetes.Interface, cfg kubeVipConfig) {
-	t.Helper()
+func(k *kubeObjectHelpers) setupKubeVip(ctx context.Context, cfg kubeVipConfig) {
+	k.t.Helper()
 
 	const name = "kube-vip-ds"
 	const version = "v1.0.1"
@@ -281,7 +286,7 @@ func setupKubeVip(ctx context.Context, t testing.TB, client kubernetes.Interface
 	const versionLabel = "app.kubernetes.io/version"
 	const namespace = metav1.NamespaceSystem
 
-	saName := setupKubeVipRbac(ctx, t, namespace, client)
+	saName := k.setupKubeVipRbac(ctx, namespace)
 
 	kubeVipDaemonSet := appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -416,14 +421,14 @@ func setupKubeVip(ctx context.Context, t testing.TB, client kubernetes.Interface
 		},
 	}
 
-	_, err := client.AppsV1().DaemonSets(namespace).Create(ctx, &kubeVipDaemonSet, metav1.CreateOptions{})
+	_, err := k.client.AppsV1().DaemonSets(namespace).Create(ctx, &kubeVipDaemonSet, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("failed to deploy kube-vip DaemonSet: %v", err)
+		k.t.Fatalf("failed to deploy kube-vip DaemonSet: %v", err)
 	}
 }
 
-func setupNginx(ctx context.Context, t testing.TB, client kubernetes.Interface, namespace string) *appsv1.Deployment {
-	t.Helper()
+func(k *kubeObjectHelpers) setupNginx(ctx context.Context, namespace string) *appsv1.Deployment {
+	k.t.Helper()
 	replicas := int32(2)
 
 	deployment := appsv1.Deployment{
@@ -457,10 +462,10 @@ func setupNginx(ctx context.Context, t testing.TB, client kubernetes.Interface, 
 		},
 	}
 
-	deployed, err := client.AppsV1().Deployments(namespace).Create(
+	deployed, err := k.client.AppsV1().Deployments(namespace).Create(
 		ctx, &deployment, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("failed to deploy nginx: %v", err)
+		k.t.Fatalf("failed to deploy nginx: %v", err)
 	}
 
 	return deployed
@@ -472,7 +477,7 @@ type loadBalancerConfig struct {
 	selector map[string]string
 }
 
-func setupLoadBalancer(ctx context.Context, t testing.TB, client kubernetes.Interface, cfg loadBalancerConfig) *corev1.Service {
+func(k *kubeObjectHelpers) setupLoadBalancer(ctx context.Context, cfg loadBalancerConfig) *corev1.Service {
 	lb := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: cfg.name,
@@ -489,9 +494,9 @@ func setupLoadBalancer(ctx context.Context, t testing.TB, client kubernetes.Inte
 		},
 	}
 
-	deployed, err := client.CoreV1().Services(cfg.namespace).Create(ctx, &lb, metav1.CreateOptions{})
+	deployed, err := k.client.CoreV1().Services(cfg.namespace).Create(ctx, &lb, metav1.CreateOptions{})
 	if err != nil {
-		t.Fatalf("failed to setup load balancer %q: %v", cfg.name, err)
+		k.t.Fatalf("failed to setup load balancer %q: %v", cfg.name, err)
 	}
 	return deployed
 }
@@ -507,7 +512,9 @@ func TestKubeVip(t *testing.T) {
 	// We need a local ASN to deploy kube-vip.
 	ensureProjectAsn(ctx, t, &env.project, env.mainNode.server)
 
-	setupKubeVip(ctx, t, env.k8sClient, kubeVipConfig{
+	kubeHelper := kubeObjectHelpers{t, env.k8sClient}
+
+	kubeHelper.setupKubeVip(ctx, kubeVipConfig{
 		localAsn:    strconv.Itoa(env.project.Bgp.LocalASN),
 		peerAsn:     strconv.Itoa(env.mainNode.server.Region.BGP.Asn),
 		peerAddress: env.mainNode.server.Region.BGP.Hosts[0],
@@ -516,16 +523,16 @@ func TestKubeVip(t *testing.T) {
 
 	const namespace = metav1.NamespaceDefault
 
-	testDeployment := setupNginx(ctx, t, env.k8sClient, namespace)
+	testDeployment := kubeHelper.setupNginx(ctx, namespace)
 	selector := testDeployment.Spec.Selector.MatchLabels
 
-	setupLoadBalancer(ctx, t, env.k8sClient, loadBalancerConfig{
+	kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
 		name: "example-service-1",
 		namespace: namespace,
 		selector: selector,
 	})
 
-	setupLoadBalancer(ctx, t, env.k8sClient, loadBalancerConfig{
+	kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
 		name: "example-service-2",
 		namespace: namespace,
 		selector: selector,
