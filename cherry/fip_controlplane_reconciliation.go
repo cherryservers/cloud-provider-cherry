@@ -2,7 +2,6 @@ package cherry
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 	v1applyconfig "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -66,7 +66,7 @@ type controlPlaneEndpointManager struct {
 	useHostIP             bool
 }
 
-func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32, useHostIP bool) (*controlPlaneEndpointManager, error) {
+func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restConfig *rest.Config, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32, useHostIP bool) (*controlPlaneEndpointManager, error) {
 	klog.V(2).Info("newControlPlaneEndpointManager()")
 
 	if fipTag == "" {
@@ -82,12 +82,15 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 	if len(parts) >= 2 {
 		fipTagValue = parts[1]
 	}
+	transport, err := rest.TransportFor(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transport for rest config: %w", err)
+	}
 	m := &controlPlaneEndpointManager{
 		httpClient: &http.Client{
-			Timeout: time.Second * 5,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			}},
+			Timeout:   time.Second * 5,
+			Transport: transport,
+		},
 		fipTagKey:     fipTagKey,
 		fipTagValue:   fipTagValue,
 		projectID:     projectID,

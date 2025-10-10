@@ -107,6 +107,13 @@ rules:
   verbs:
   - patch
 - apiGroups:
+  # reason: so can access healthz endpoints
+  - ""
+  resources:
+  - nodes/proxy
+  verbs:
+  - get
+- apiGroups:
   # reason: so ccm can manage services for loadbalancer
   - ""
   resources:

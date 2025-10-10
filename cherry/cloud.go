@@ -77,10 +77,11 @@ func init() {
 func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
 	klog.V(5).Info("called Initialize")
 	clientset := clientBuilder.ClientOrDie("cloud-provider-cherry-shared-informers")
+	restConfig := clientBuilder.ConfigOrDie("cloud-provider-cherry-shared-informers")
 
 	// initialize the individual services
 	projectID := c.config.ProjectID
-	epm, err := newControlPlaneEndpointManager(clientset, stop, c.config.FIPTag, projectID, c.client, c.config.APIServerPort, c.config.FIPHealthCheckUseHostIP)
+	epm, err := newControlPlaneEndpointManager(clientset, restConfig, stop, c.config.FIPTag, projectID, c.client, c.config.APIServerPort, c.config.FIPHealthCheckUseHostIP)
 	if err != nil {
 		klog.Fatalf("could not initialize ControlPlaneEndpointManager: %v", err)
 	}
