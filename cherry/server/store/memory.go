@@ -101,6 +101,7 @@ func (m *Memory) CreatePlan(name string) (*cherrygo.Plan, error) {
 	plan := &cherrygo.Plan{
 		ID:   m.getID(),
 		Name: name,
+		Slug: "slug-" + name,
 	}
 	m.plans[plan.ID] = plan
 	return plan, nil

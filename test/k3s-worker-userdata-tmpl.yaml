@@ -1,0 +1,63 @@
+#cloud-config
+# K3s control plane installation userdata
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - jq
+
+write_files:
+  - path: /etc/systemd/system/k3s-ready.service
+    content: |
+      [Unit]
+      Description=Mark k3s as ready
+      After=k3s.service
+      Requires=k3s.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/bash -c 'until kubectl get nodes | grep -q Ready; do sleep 5; done; touch /var/log/k3s-ready'
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+    permissions: '0644'
+
+runcmd:
+  # Install k3s with minimal configuration
+  # Get the control plane's IP or DNS (replace with your actual address)
+  - CONTROL_PLANE_IP="{{CONTROL_PLANE_IP}}"
+  
+  # Join token (you can fetch it dynamically from the control plane, or inject it securely)
+  - K3S_TOKEN="$(curl -sfL http://${CONTROL_PLANE_IP}:8080/v1-k3s/server-token)" || true
+
+  # Install k3s agent
+  - |
+    EXTERNAL_IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
+    echo "Detected external IP: $EXTERNAL_IP"
+    INTERNAL_IP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | grep -E '^10\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^192\.168\.' | head -n1)
+    echo "Detected internal IP: $INTERNAL_IP"
+    curl -sfL https://get.k3s.io | \
+    K3S_URL="https://${CONTROL_PLANE_IP}:6443" \
+    K3S_TOKEN="{{K3S_TOKEN}}" \
+    INSTALL_K3S_EXEC="--kubelet-arg=cloud-provider=external \
+                      --node-ip=${INTERNAL_IP} \
+                      --node-external-ip=${EXTERNAL_IP}" \
+    sh -
+
+  # Wait for k3s-agent to be active
+  - systemctl enable k3s-agent.service
+  - systemctl start k3s-agent.service
+
+  # Simple validation script
+  - |
+    cat > /root/test-agent.sh << 'EOF'
+    #!/bin/bash
+    echo "Testing k3s agent..."
+    systemctl is-active --quiet k3s-agent && echo "k3s-agent is running."
+    EOF
+  - chmod +x /root/test-agent.sh
+
+final_message: "K3s control plane installation completed!"

@@ -1,0 +1,67 @@
+#cloud-config
+# K3s control plane installation userdata
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - jq
+
+write_files:
+  - path: /etc/systemd/system/k3s-ready.service
+    content: |
+      [Unit]
+      Description=Mark k3s as ready
+      After=k3s.service
+      Requires=k3s.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/bash -c 'until kubectl get nodes | grep -q Ready; do sleep 5; done; touch /var/log/k3s-ready'
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+    permissions: '0644'
+
+runcmd:
+  # Install k3s with minimal configuration
+  - |
+    EXTERNAL_IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
+    echo "Detected external IP: $EXTERNAL_IP"
+    INTERNAL_IP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | grep -E '^10\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^192\.168\.' | head -n1)
+    echo "Detected internal IP: $INTERNAL_IP"
+    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable=traefik \
+                    --disable=servicelb \
+                    --disable-cloud-controller \
+                    --kubelet-arg=cloud-provider=external \
+                    --kube-controller-manager-arg=cloud-provider=external \
+                    --tls-san=127.0.0.1 \
+                    --tls-san=${INTERNAL_IP} \
+                    --tls-san=${EXTERNAL_IP} \
+                    --advertise-address=$EXTERNAL_IP \
+                    --node-ip=${INTERNAL_IP} \
+                    --node-external-ip=$EXTERNAL_IP" sh -
+  # Wait for k3s to be ready
+  - systemctl enable k3s-ready.service
+  - systemctl start k3s-ready.service
+  
+  # Set up kubeconfig for root user
+  - mkdir -p /root/.kube
+  - cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
+  - chmod 600 /root/.kube/config
+  
+  # Create a simple test to verify k3s is working
+  - |
+    cat > /root/test-k3s.sh << 'EOF'
+    #!/bin/bash
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+    echo "Testing k3s cluster..."
+    kubectl get nodes
+    kubectl get pods -A
+    echo "k3s cluster is ready!"
+    EOF
+  - chmod +x /root/test-k3s.sh
+
+final_message: "K3s control plane installation completed!"

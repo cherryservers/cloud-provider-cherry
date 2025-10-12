@@ -4,6 +4,23 @@ This directory contains instructions for testing, and, eventually, automated tes
 
 The directory `manifests/` contains useful manifests for testing.
 
+The file `test.sh` contains a script that:
+
+1. Deploys cherry servers with Kubernetes cluster on it
+1. Waits for the cluster to be ready
+1. Runs the end-to-end tests described below
+
+The variables to run the script are as follows:
+
+* `DEBUG` - if set to any value, enables debug output
+* `CHERRY_AUTH_TOKEN` - required, the Cherry Servers API token to use
+* `CHERRY_REGION_NAME` - optional, the Cherry Servers region to deploy in; defaults to `LT-Siauliai`
+* `PROJECT_ID` - required, the Cherry Servers project ID to deploy in
+* `IMAGE` - optional, the Cherry Servers image to use; defaults to `ubuntu_24_04_64bit`
+* `PARTITION_SIZE` - optional, the size of the root partition to create, in GB; defaults to `40`
+* `CCM_PATH` - required, the path to the CCM binary to use. It **must** be compiled for the target cluster platform before running the script.
+* `NO_CLEANUP` - if set to any value, does not clean up the temporary resources created, for debugging purposes
+
 ## End-to-End Tests
 
 What end-to-end tests are required to test the CCM?
