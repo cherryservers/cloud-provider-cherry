@@ -2,7 +2,6 @@ package cherry
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 	v1applyconfig "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -66,13 +66,19 @@ type controlPlaneEndpointManager struct {
 	useHostIP             bool
 }
 
-func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32, useHostIP bool) (*controlPlaneEndpointManager, error) {
+func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *rest.Config, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32, useHostIP bool) (*controlPlaneEndpointManager, error) {
 	klog.V(2).Info("newControlPlaneEndpointManager()")
 
 	if fipTag == "" {
 		klog.Info("Floating IP Tag is not configured skipping control plane endpoint management.")
 		return nil, nil
 	}
+
+	httpClient, err := rest.HTTPClientFor(restCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build http client from rest config: %w", err)
+	}
+	httpClient.Timeout = time.Second * 5
 
 	var fipTagKey, fipTagValue string
 	parts := strings.SplitN(fipTag, "=", 2)
@@ -83,11 +89,7 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, stop <-chan 
 		fipTagValue = parts[1]
 	}
 	m := &controlPlaneEndpointManager{
-		httpClient: &http.Client{
-			Timeout: time.Second * 5,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			}},
+		httpClient:    httpClient,
 		fipTagKey:     fipTagKey,
 		fipTagValue:   fipTagValue,
 		projectID:     projectID,
