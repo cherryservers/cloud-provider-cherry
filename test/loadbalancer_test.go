@@ -627,4 +627,32 @@ func TestKubeVip(t *testing.T) {
 		assertFipTags(t, fips, wantTags)
 	})
 
+	t.Run("server bgp", func(t *testing.T) {
+		kubeHelper.t = t
+
+		srv, _, err := cherryClientFixture.Servers.Get(env.mainNode.server.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get server: %v", err)
+		}
+
+		if got, want := srv.BGP.Enabled, true; got != want {
+			t.Errorf("server %q bgp=%t, want=%t", srv.Name, got, want)
+		}
+	})
+
+	t.Run("project bgp", func(t *testing.T) {
+		kubeHelper.t = t
+
+		project, _, err := cherryClientFixture.Projects.Get(env.project.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get project: %v", err)
+		}
+
+		if got, want := project.Bgp.Enabled, true; got != want {
+			t.Errorf("project %q bgp=%t, want=%t", project.Name, got, want)
+		}
+	})
+
+	
+
 }
