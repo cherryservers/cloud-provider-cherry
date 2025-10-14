@@ -2,10 +2,15 @@ package test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
+	"maps"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -16,8 +21,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	apiwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/watch"
 )
 
 func setupProject(t testing.TB, name string) cherrygo.Project {
@@ -202,11 +211,11 @@ func ensureProjectAsn(ctx context.Context, t testing.TB, project *cherrygo.Proje
 }
 
 type kubeObjectHelpers struct {
-	t testing.TB
+	t      testing.TB
 	client kubernetes.Interface
 }
 
-func(k *kubeObjectHelpers) setupKubeVipRbac(ctx context.Context, namespace string) (saName string) {
+func (k *kubeObjectHelpers) setupKubeVipRbac(ctx context.Context, namespace string) (saName string) {
 	k.t.Helper()
 
 	const kubeVipSaName = "kube-vip"
@@ -277,7 +286,7 @@ type kubeVipConfig struct {
 	routerID    string
 }
 
-func(k *kubeObjectHelpers) setupKubeVip(ctx context.Context, cfg kubeVipConfig) {
+func (k *kubeObjectHelpers) setupKubeVip(ctx context.Context, cfg kubeVipConfig) {
 	k.t.Helper()
 
 	const name = "kube-vip-ds"
@@ -427,7 +436,7 @@ func(k *kubeObjectHelpers) setupKubeVip(ctx context.Context, cfg kubeVipConfig) 
 	}
 }
 
-func(k *kubeObjectHelpers) setupNginx(ctx context.Context, namespace string) *appsv1.Deployment {
+func (k *kubeObjectHelpers) setupNginx(ctx context.Context, namespace string) *appsv1.Deployment {
 	k.t.Helper()
 	replicas := int32(2)
 
@@ -472,12 +481,12 @@ func(k *kubeObjectHelpers) setupNginx(ctx context.Context, namespace string) *ap
 }
 
 type loadBalancerConfig struct {
-	name string
+	name      string
 	namespace string
-	selector map[string]string
+	selector  map[string]string
 }
 
-func(k *kubeObjectHelpers) setupLoadBalancer(ctx context.Context, cfg loadBalancerConfig) *corev1.Service {
+func (k *kubeObjectHelpers) setupLoadBalancer(ctx context.Context, cfg loadBalancerConfig) *corev1.Service {
 	lb := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: cfg.name,
@@ -486,7 +495,7 @@ func(k *kubeObjectHelpers) setupLoadBalancer(ctx context.Context, cfg loadBalanc
 			Selector: cfg.selector,
 			Ports: []corev1.ServicePort{
 				{
-					Port: 8765,
+					Port:       8765,
 					TargetPort: intstr.FromInt(9376),
 				},
 			},
@@ -499,6 +508,67 @@ func(k *kubeObjectHelpers) setupLoadBalancer(ctx context.Context, cfg loadBalanc
 		k.t.Fatalf("failed to setup load balancer %q: %v", cfg.name, err)
 	}
 	return deployed
+}
+
+func (k *kubeObjectHelpers) loadBalancerFipTags(ctx context.Context, svc corev1.Service) map[string]string {
+	systemNamespace, err := k.client.CoreV1().Namespaces().Get(ctx, metav1.NamespaceSystem, metav1.GetOptions{})
+	if err != nil {
+		k.t.Fatalf("failed to get system namespace: %v", err)
+	}
+	clusterID := string(systemNamespace.UID)
+
+	svcChecksum := sha256.Sum256(fmt.Appendf(nil, "%s/%s", svc.Namespace, svc.Name))
+	svcRep := base64.StdEncoding.EncodeToString(svcChecksum[:])
+
+	return map[string]string{
+		"cluster": clusterID,
+		"service": svcRep,
+		"usage":   "cloud-provider-cherry-auto",
+	}
+}
+
+func (k *kubeObjectHelpers) untilLoadBalancerEnsured(ctx context.Context, name, namespace string) {
+	lw := cache.NewListWatchFromClient(k.client.CoreV1().RESTClient(), "services", namespace, fields.Everything())
+
+	_, err := watch.UntilWithSync(ctx, lw, &corev1.Service{}, nil, func(event apiwatch.Event) (done bool, err error) {
+		svc, ok := event.Object.(*corev1.Service)
+		if !ok {
+			return false, fmt.Errorf("unexpected object type: %T", event.Object)
+		}
+		if svc.ObjectMeta.Name != name {
+			return false, nil
+		}
+		// LB should be ensured, when ingress is set.
+		if len(svc.Status.LoadBalancer.Ingress) > 0 {
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		k.t.Fatalf("ingress ip not set for load balancer %q: %v", name, err)
+	}
+
+}
+
+func fipsContainTags(fips []cherrygo.IPAddress, wantTags map[string]string) bool {
+	return slices.ContainsFunc(fips, func(fip cherrygo.IPAddress) bool {
+		if fip.Tags == nil {
+			return false
+		}
+		return maps.Equal(*fip.Tags, wantTags)
+	})
+}
+
+func assertFipTags(t testing.TB, fips []cherrygo.IPAddress, wantTags map[string]string) {
+	if !fipsContainTags(fips, wantTags) {
+		var b strings.Builder
+		for _, fip := range fips {
+			if fip.Type == "floating-ip" {
+				fmt.Fprintln(&b, *fip.Tags)
+			}
+		}
+		t.Errorf("fip tags: %s, want one %v", b.String(), wantTags)
+	}
 }
 
 func TestKubeVip(t *testing.T) {
@@ -526,16 +596,35 @@ func TestKubeVip(t *testing.T) {
 	testDeployment := kubeHelper.setupNginx(ctx, namespace)
 	selector := testDeployment.Spec.Selector.MatchLabels
 
-	kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
-		name: "example-service-1",
+	firstSvc := kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
+		name:      "example-service-1",
 		namespace: namespace,
-		selector: selector,
+		selector:  selector,
 	})
 
-	kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
-		name: "example-service-2",
+	kubeHelper.untilLoadBalancerEnsured(ctx, "example-service-1", namespace)
+
+	secondSvc := kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
+		name:      "example-service-2",
 		namespace: namespace,
-		selector: selector,
+		selector:  selector,
+	})
+
+	kubeHelper.untilLoadBalancerEnsured(ctx, "example-service-2", namespace)
+
+	t.Run("fip tags", func(t *testing.T) {
+		kubeHelper.t = t
+
+		fips, _, err := cherryClientFixture.IPAddresses.List(env.project.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get fips: %v", err)
+		}
+
+		wantTags := kubeHelper.loadBalancerFipTags(ctx, *firstSvc)
+		assertFipTags(t, fips, wantTags)
+
+		wantTags = kubeHelper.loadBalancerFipTags(ctx, *secondSvc)
+		assertFipTags(t, fips, wantTags)
 	})
 
 }
