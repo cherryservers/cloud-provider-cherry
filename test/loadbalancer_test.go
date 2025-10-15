@@ -653,6 +653,41 @@ func TestKubeVip(t *testing.T) {
 		}
 	})
 
-	
+	t.Run("node annotations", func(t *testing.T) {
+		kubeHelper.t = t
+
+		node, err := env.k8sClient.CoreV1().Nodes().Get(ctx, env.mainNode.server.Hostname, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get node: %v", err)
+		}
+
+		srv, _, err := cherryClientFixture.Servers.Get(env.mainNode.server.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get server: %v", err)
+		}
+
+		project, _, err := cherryClientFixture.Projects.Get(env.project.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get project: %v", err)
+		}
+
+		for i, peerIp := range srv.Region.BGP.Hosts {
+			peerAsnKey := strings.Replace(ccm.DefaultAnnotationPeerASN, "{{n}}", strconv.Itoa(i), 1)
+			if got, want := node.Annotations[peerAsnKey], strconv.Itoa(srv.Region.BGP.Asn); got != want {
+				t.Errorf("peerAsn=%s, want=%s, key=%s", got, want, peerAsnKey)
+			}
+
+			nodeAsnKey := strings.Replace(ccm.DefaultAnnotationNodeASN, "{{n}}", strconv.Itoa(i), 1)
+			if got, want := node.Annotations[nodeAsnKey], strconv.Itoa(project.Bgp.LocalASN); got != want {
+				t.Errorf("nodeAsn=%s, want=%s, key=%s", got, want, nodeAsnKey)
+			}
+
+			peerIpKey := strings.Replace(ccm.DefaultAnnotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
+			if got, want := node.Annotations[peerIpKey], peerIp; got != want {
+				t.Errorf("peerIp=%s, want=%s, key=%s", got, want, peerIpKey)
+			}
+		}
+
+	})
 
 }
