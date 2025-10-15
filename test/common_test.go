@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/rand"
 	"time"
+
+	"github.com/cherryservers/cherrygo/v3"
 )
 
 type backoffStoppedError struct{}
@@ -68,4 +70,14 @@ func expBackoffWithContext(f func() (bool, error), cfg ExpBackoffConfigWithConte
 	default:
 		return nil
 	}
+}
+
+func fipCount(fips []cherrygo.IPAddress) int {
+	count := 0
+	for _, fip := range fips {
+		if fip.Type == "floating-ip" {
+			count++
+		}
+	}
+	return count
 }
