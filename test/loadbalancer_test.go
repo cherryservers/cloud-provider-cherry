@@ -510,7 +510,7 @@ func (k *kubeObjectHelpers) setupLoadBalancer(ctx context.Context, cfg loadBalan
 	return deployed
 }
 
-func (k *kubeObjectHelpers) loadBalancerFipTags(ctx context.Context, svc corev1.Service) map[string]string {
+func (k *kubeObjectHelpers) loadBalancerFipTags(ctx context.Context, svc *corev1.Service) map[string]string {
 	systemNamespace, err := k.client.CoreV1().Namespaces().Get(ctx, metav1.NamespaceSystem, metav1.GetOptions{})
 	if err != nil {
 		k.t.Fatalf("failed to get system namespace: %v", err)
@@ -528,6 +528,7 @@ func (k *kubeObjectHelpers) loadBalancerFipTags(ctx context.Context, svc corev1.
 }
 
 func (k *kubeObjectHelpers) untilLoadBalancerEnsured(ctx context.Context, name, namespace string) {
+	k.t.Helper()
 	lw := cache.NewListWatchFromClient(k.client.CoreV1().RESTClient(), "services", namespace, fields.Everything())
 
 	_, err := watch.UntilWithSync(ctx, lw, &corev1.Service{}, nil, func(event apiwatch.Event) (done bool, err error) {
@@ -571,6 +572,135 @@ func assertFipTags(t testing.TB, fips []cherrygo.IPAddress, wantTags map[string]
 	}
 }
 
+type loadBalancerSubTester struct {
+	firstSvc  *corev1.Service
+	secondSvc *corev1.Service
+	env       *testEnv
+}
+
+func (s loadBalancerSubTester) testFipTags(ctx context.Context, t *testing.T) {
+	t.Run("fip tags", func(t *testing.T) {
+		kubeHelper := kubeObjectHelpers{t: t, client: s.env.k8sClient}
+
+		fips, _, err := cherryClientFixture.IPAddresses.List(s.env.project.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get fips: %v", err)
+		}
+
+		wantTags := kubeHelper.loadBalancerFipTags(ctx, s.firstSvc)
+		assertFipTags(t, fips, wantTags)
+
+		wantTags = kubeHelper.loadBalancerFipTags(ctx, s.secondSvc)
+		assertFipTags(t, fips, wantTags)
+	})
+}
+
+func (s loadBalancerSubTester) testServerBgpEnabled(ctx context.Context, t *testing.T) {
+	t.Run("server bgp enabled", func(t *testing.T) {
+		srv, _, err := cherryClientFixture.Servers.Get(s.env.mainNode.server.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get server: %v", err)
+		}
+
+		if got, want := srv.BGP.Enabled, true; got != want {
+			t.Errorf("server %q bgp=%t, want=%t", srv.Name, got, want)
+		}
+	})
+}
+
+func (s loadBalancerSubTester) testProjectBgpEnabled(ctx context.Context, t *testing.T) {
+	t.Run("project bgp enabled", func(t *testing.T) {
+		project, _, err := cherryClientFixture.Projects.Get(s.env.project.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get project: %v", err)
+		}
+
+		if got, want := project.Bgp.Enabled, true; got != want {
+			t.Errorf("project %q bgp=%t, want=%t", project.Name, got, want)
+		}
+	})
+}
+
+func (s loadBalancerSubTester) testNodeHasAnnotations(ctx context.Context, t *testing.T) {
+	t.Run("node has annotations", func(t *testing.T) {
+		node, err := s.env.k8sClient.CoreV1().Nodes().Get(ctx, s.env.mainNode.server.Hostname, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get node: %v", err)
+		}
+
+		srv, _, err := cherryClientFixture.Servers.Get(s.env.mainNode.server.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get server: %v", err)
+		}
+
+		project, _, err := cherryClientFixture.Projects.Get(s.env.project.ID, nil)
+		if err != nil {
+			t.Fatalf("failed to get project: %v", err)
+		}
+
+		for i, peerIp := range srv.Region.BGP.Hosts {
+			peerAsnKey := strings.Replace(ccm.DefaultAnnotationPeerASN, "{{n}}", strconv.Itoa(i), 1)
+			if got, want := node.Annotations[peerAsnKey], strconv.Itoa(srv.Region.BGP.Asn); got != want {
+				t.Errorf("peerAsn=%s, want=%s, key=%s", got, want, peerAsnKey)
+			}
+
+			nodeAsnKey := strings.Replace(ccm.DefaultAnnotationNodeASN, "{{n}}", strconv.Itoa(i), 1)
+			if got, want := node.Annotations[nodeAsnKey], strconv.Itoa(project.Bgp.LocalASN); got != want {
+				t.Errorf("nodeAsn=%s, want=%s, key=%s", got, want, nodeAsnKey)
+			}
+
+			peerIpKey := strings.Replace(ccm.DefaultAnnotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
+			if got, want := node.Annotations[peerIpKey], peerIp; got != want {
+				t.Errorf("peerIp=%s, want=%s, key=%s", got, want, peerIpKey)
+			}
+		}
+	})
+}
+
+func (s loadBalancerSubTester) testNodeDoesntHaveAnnotations(ctx context.Context, t *testing.T) {
+	t.Run("node doesn't have annotations", func(t *testing.T) {
+		node, err := s.env.k8sClient.CoreV1().Nodes().Get(ctx, s.env.mainNode.server.Hostname, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get node: %v", err)
+		}
+
+		for i := range s.env.mainNode.server.Region.BGP.Hosts {
+			peerAsnKey := strings.Replace(ccm.DefaultAnnotationPeerASN, "{{n}}", strconv.Itoa(i), 1)
+			if got, ok := node.Annotations[peerAsnKey]; ok != false {
+				t.Errorf("peerAsn=%s, want: not found, key=%s", got, peerAsnKey)
+			}
+
+			nodeAsnKey := strings.Replace(ccm.DefaultAnnotationNodeASN, "{{n}}", strconv.Itoa(i), 1)
+			if got, ok := node.Annotations[nodeAsnKey]; ok != false {
+				t.Errorf("nodeAsn=%s, want: not found, key=%s", got, nodeAsnKey)
+			}
+
+			peerIpKey := strings.Replace(ccm.DefaultAnnotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
+			if got, ok := node.Annotations[peerIpKey]; ok != false {
+				t.Errorf("peerIp=%s, want: not found, key=%s", got, peerIpKey)
+			}
+		}
+	})
+}
+
+func untilFipCount(ctx context.Context, t *testing.T, projectID, count int) error {
+	fipRemovedCtx, cancel := context.WithTimeout(ctx, eventTimeout)
+	defer cancel()
+
+	return expBackoffWithContext(func() (bool, error) {
+		fips, _, err := cherryClientFixture.IPAddresses.List(projectID, nil)
+		if err != nil {
+			return false, fmt.Errorf("failed to get ips: %w", err)
+		}
+
+		c := fipCount(fips)
+		if c != count {
+			return false, nil
+		}
+		return true, nil
+	}, defaultExpBackoffConfigWithContext(fipRemovedCtx))
+}
+
 func TestKubeVip(t *testing.T) {
 	const testName = "kubernetes-ccm-test-lb-kube-vip"
 	ctx := t.Context()
@@ -612,82 +742,40 @@ func TestKubeVip(t *testing.T) {
 
 	kubeHelper.untilLoadBalancerEnsured(ctx, "example-service-2", namespace)
 
-	t.Run("fip tags", func(t *testing.T) {
-		kubeHelper.t = t
+	subtester := loadBalancerSubTester{
+		firstSvc:  firstSvc,
+		secondSvc: secondSvc,
+		env:       env,
+	}
 
-		fips, _, err := cherryClientFixture.IPAddresses.List(env.project.ID, nil)
+	subtester.testFipTags(ctx, t)
+	subtester.testServerBgpEnabled(ctx, t)
+	subtester.testProjectBgpEnabled(ctx, t)
+	subtester.testNodeHasAnnotations(ctx, t)
+
+	t.Run("remove first service", func(t *testing.T) {
+		err := env.k8sClient.CoreV1().Services(namespace).Delete(ctx, firstSvc.Name, metav1.DeleteOptions{})
 		if err != nil {
-			t.Fatalf("failed to get fips: %v", err)
+			t.Fatalf("failed to delete service %q: %v", firstSvc.Name, err)
+		}
+		err = untilFipCount(ctx, t, env.project.ID, 1)
+		if err != nil {
+			t.Errorf("fip count not reduced after service removal: %v", err)
 		}
 
-		wantTags := kubeHelper.loadBalancerFipTags(ctx, *firstSvc)
-		assertFipTags(t, fips, wantTags)
-
-		wantTags = kubeHelper.loadBalancerFipTags(ctx, *secondSvc)
-		assertFipTags(t, fips, wantTags)
+		subtester.testNodeHasAnnotations(ctx, t)
 	})
 
-	t.Run("server bgp", func(t *testing.T) {
-		kubeHelper.t = t
-
-		srv, _, err := cherryClientFixture.Servers.Get(env.mainNode.server.ID, nil)
+	t.Run("remove second services", func(t *testing.T) {
+		err := env.k8sClient.CoreV1().Services(namespace).Delete(ctx, secondSvc.Name, metav1.DeleteOptions{})
 		if err != nil {
-			t.Fatalf("failed to get server: %v", err)
+			t.Fatalf("failed to delete service %q: %v", secondSvc.Name, err)
+		}
+		err = untilFipCount(ctx, t, env.project.ID, 0)
+		if err != nil {
+			t.Errorf("fip count not reduced after service removal: %v", err)
 		}
 
-		if got, want := srv.BGP.Enabled, true; got != want {
-			t.Errorf("server %q bgp=%t, want=%t", srv.Name, got, want)
-		}
+		subtester.testNodeDoesntHaveAnnotations(ctx, t)
 	})
-
-	t.Run("project bgp", func(t *testing.T) {
-		kubeHelper.t = t
-
-		project, _, err := cherryClientFixture.Projects.Get(env.project.ID, nil)
-		if err != nil {
-			t.Fatalf("failed to get project: %v", err)
-		}
-
-		if got, want := project.Bgp.Enabled, true; got != want {
-			t.Errorf("project %q bgp=%t, want=%t", project.Name, got, want)
-		}
-	})
-
-	t.Run("node annotations", func(t *testing.T) {
-		kubeHelper.t = t
-
-		node, err := env.k8sClient.CoreV1().Nodes().Get(ctx, env.mainNode.server.Hostname, metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("failed to get node: %v", err)
-		}
-
-		srv, _, err := cherryClientFixture.Servers.Get(env.mainNode.server.ID, nil)
-		if err != nil {
-			t.Fatalf("failed to get server: %v", err)
-		}
-
-		project, _, err := cherryClientFixture.Projects.Get(env.project.ID, nil)
-		if err != nil {
-			t.Fatalf("failed to get project: %v", err)
-		}
-
-		for i, peerIp := range srv.Region.BGP.Hosts {
-			peerAsnKey := strings.Replace(ccm.DefaultAnnotationPeerASN, "{{n}}", strconv.Itoa(i), 1)
-			if got, want := node.Annotations[peerAsnKey], strconv.Itoa(srv.Region.BGP.Asn); got != want {
-				t.Errorf("peerAsn=%s, want=%s, key=%s", got, want, peerAsnKey)
-			}
-
-			nodeAsnKey := strings.Replace(ccm.DefaultAnnotationNodeASN, "{{n}}", strconv.Itoa(i), 1)
-			if got, want := node.Annotations[nodeAsnKey], strconv.Itoa(project.Bgp.LocalASN); got != want {
-				t.Errorf("nodeAsn=%s, want=%s, key=%s", got, want, nodeAsnKey)
-			}
-
-			peerIpKey := strings.Replace(ccm.DefaultAnnotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
-			if got, want := node.Annotations[peerIpKey], peerIp; got != want {
-				t.Errorf("peerIp=%s, want=%s, key=%s", got, want, peerIpKey)
-			}
-		}
-
-	})
-
 }
