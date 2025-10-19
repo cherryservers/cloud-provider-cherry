@@ -168,6 +168,9 @@ echo "    KUBECONFIG=${KUBECONFIG} kubectl get nodes"
 echo ""
 echo "Note: The SSH key will be cleaned up when the script exits."
 
+# get the cluster UID
+CLUSTER_UID=$(kubectl get namespace kube-system -o jsonpath='{.metadata.uid}')
+echo "Cluster UID: $CLUSTER_UID"
 
 ## Deploy the CCM
 # Assumes it already is built and available as a binary locally
@@ -234,7 +237,6 @@ PARTITION_ARG=""
 if [ "$PLAN_TYPE" = "baremetal" ]; then
     PARTITION_ARG="--os-partition-size ${PARTITION_SIZE}"
 fi
-USERDATA_FILE="$(dirname "$0")/k3s-control-userdata.yaml"
 RESULT=$(cherryctl server create --output json \
     --project-id ${PROJECT_ID} --hostname k8s-ccm-test-worker-1 \
     --plan ${PLAN} --region ${REGION} --image ${IMAGE} ${PARTITION_ARG} \
@@ -350,3 +352,262 @@ if [ "$WORKER_REMOVED" != "true" ]; then
     echo "$(date) worker node k8s-ccm-test-worker-1 was not removed from k3s in $WORKER_REMOVAL_WAIT seconds after server deletion"
     exit 1
 fi
+
+## load balancer tests; we need to add a worker
+
+echo "deploying worker with k3s"
+PARTITION_ARG=""
+if [ "$PLAN_TYPE" = "baremetal" ]; then
+    PARTITION_ARG="--os-partition-size ${PARTITION_SIZE}"
+fi
+RESULT=$(cherryctl server create --output json \
+    --project-id ${PROJECT_ID} --hostname k8s-ccm-test-worker-1 \
+    --plan ${PLAN} --region ${REGION} --image ${IMAGE} ${PARTITION_ARG} \
+    --ssh-keys ${SSH_KEY_ID} \
+    --userdata-file "${WORKER_USERDATA_FILE}")
+
+ID_WORKER=$(echo $RESULT | jq -r '.id')
+
+echo "waiting for worker ${ID_WORKER} to be ready"
+
+# wait up to $SERVERWAIT seconds for the server to be active
+PASSED=0
+INTERVAL=30
+STATE=""
+while [ $PASSED -lt $SERVERWAIT ]; do
+    STATE=$(cherryctl server get $ID_WORKER --output json | jq -r '.state')
+    if [ "$STATE" = "active" ]; then
+        echo "worker server $ID_WORKER state 'active', success"
+        break
+    else
+        echo "worker server $ID_WORKER state '$STATE', waiting $INTERVAL seconds..."
+        sleep $INTERVAL
+        PASSED=$(($PASSED + $INTERVAL))
+    fi
+done
+
+if [ "$STATE" != "active" ]; then
+	echo "worker server $ID_WORKER did not become active in $SERVERWAIT seconds, exiting"
+	exit 1
+fi
+
+# Get server IP for k3s readiness check
+IP_WORKER=$(cherryctl server get $ID_WORKER --output json | jq -r '.ip_addresses[] | select(.type == "primary-ip") | .address')
+[ -z "$IP_WORKER" ] && { echo "Failed to get server IP address"; exit 1; }
+echo "server $ID_WORKER deployed successfully at IP $IP_WORKER, now checking k3s readiness..."
+
+# wait for the worker to be ready in k3s
+echo "waiting for worker node to be ready in k3s"
+PASSED=0
+INTERVAL=15
+WORKER_READY=false
+while [ $PASSED -lt $K3SWAIT ]; do
+    # Check if the worker node appears in kubectl get nodes
+    if kubectl get node "k8s-ccm-test-worker-1" | grep -q -i -w ready; then
+        echo "worker node k8s-ccm-test-worker-1 is now ready in k3s"
+        WORKER_READY=true
+        break
+    else
+        echo "worker node not visible yet, waiting $INTERVAL seconds..."
+        sleep $INTERVAL
+        PASSED=$(($PASSED + $INTERVAL))
+    fi
+done
+
+if [ "$WORKER_READY" != "true" ]; then
+    echo "worker node did not become ready in $K3SWAIT seconds"
+    echo "You can check k3s status manually by connecting to the server:"
+    echo "  ssh -i \"$SSH_PRIVATE_KEY\" root@$IP_CONTROLPLANE"
+    echo "  kubectl get nodes"
+    exit 1
+fi
+
+## deploy metallb
+METALLB_VERSION=$(curl -sL https://api.github.com/repos/metallb/metallb/releases | jq -r ".[0].tag_name")
+kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/${METALLB_VERSION}/config/manifests/metallb-native.yaml
+
+# wait 30 seconds to be safe
+sleep 30
+
+# deploy nginx service 1
+kubectl apply -f "$MANIFESTS_DIR/nginx-1.yaml"
+# wait for the service to get an IP
+echo "waiting for nginx-1 service to get an external IP"
+PASSED=0
+INTERVAL=10
+FIP_WAIT=30
+SVC_READY=false
+NGINX1_IP=""
+while [ $PASSED -lt $FIP_WAIT ]; do
+    NGINX1_IP=$(kubectl get svc nginx-1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+    if [ -n "$NGINX1_IP" ]; then
+        echo "nginx-1 service has external IP: $NGINX1_IP"
+        SVC_READY=true
+        break
+    else
+        echo "nginx-1 service does not have an external IP yet, waiting $INTERVAL seconds..."
+        sleep $INTERVAL
+        PASSED=$(($PASSED + $INTERVAL))
+    fi
+done
+
+if [ "$SVC_READY" != "true" ]; then
+    echo "nginx-1 service did not get an external IP in $FIP_WAIT seconds"
+    exit 1
+fi
+# get the floating IP for it
+NGINX1_FIP_JSON=$(cherryctl ip list -o json | jq -r '.[] | select(.address == "'$NGINX1_IP'")')
+if [ -z "$NGINX1_FIP_JSON" ]; then
+    echo "nginx-1 service does not have a floating IP"
+    exit 1
+fi
+echo "nginx-1 service floating IP: $NGINX1_IP"
+
+# check the tags
+NGINX1_FIP_TAG_USAGE=$(echo "$NGINX1_FIP_JSON" | jq -r '.tags.usage')
+if [ "$NGINX1_FIP_TAG_USAGE" != "cloud-provider-cherry-auto" ]; then
+    echo "nginx-1 service floating IP does not have correct usage tag, got: $NGINX1_FIP_TAG_USAGE"
+    exit 1
+fi
+NGINX1_FIP_TAG_CLUSTER=$(echo "$NGINX1_FIP_JSON" | jq -r '.tags.cluster')
+if [ "$NGINX1_FIP_TAG_CLUSTER" != "$CLUSTER_UID" ]; then
+    echo "nginx-1 service floating IP does not have correct cluster tag, got $NGINX1_FIP_TAG_CLUSTER, expected $CLUSTER_UID"
+    exit 1
+fi
+NGINX1_FIP_TAG_SERICE=$(echo "$NGINX1_FIP_JSON" | jq -r '.tags.service')
+NGINX1_EXPECTED_SERVICE_TAG=$(print 'default/nginx-1' | sha256sum | awk '{print $1}' | xxd -r -p | base64)
+if [ "$NGINX1_FIP_TAG_SERICE" != "$NGINX1_EXPECTED_SERVICE_TAG" ]; then
+    echo "nginx-1 service floating IP does not have correct service tag, got $NGINX1_FIP_TAG_SERICE, expected $NGINX1_EXPECTED_SERVICE_TAG"
+    exit 1
+fi
+
+echo "nginx-1 service floating IP tags are correct"
+
+# deploy nginx service 2
+kubectl apply -f "$MANIFESTS_DIR/nginx-2.yaml"
+# wait for the service to get an IP
+echo "waiting for nginx-2 service to get an external IP"
+PASSED=0
+INTERVAL=10
+FIP_WAIT=30
+SVC_READY=false
+NGINX2_IP=""
+while [ $PASSED -lt $FIP_WAIT ]; do
+    NGINX2_IP=$(kubectl get svc nginx-2 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+    if [ -n "$NGINX2_IP" ]; then
+        echo "nginx-2 service has external IP: $NGINX2_IP"
+        SVC_READY=true
+        break
+    else
+        echo "nginx-2 service does not have an external IP yet, waiting $INTERVAL seconds..."
+        sleep $INTERVAL
+        PASSED=$(($PASSED + $INTERVAL))
+    fi
+done
+if [ "$SVC_READY" != "true" ]; then
+    echo "nginx-2 service did not get an external IP in $FIP_WAIT seconds"
+    exit 1
+fi
+
+
+
+# get the floating IP for it
+NGINX2_FIP_JSON=$(cherryctl ip list -o json | jq -r '.[] | select(.address == "'$NGINX2_IP'")')
+if [ -z "$NGINX2_FIP_JSON" ]; then
+    echo "nginx-2 service does not have a floating IP"
+    exit 1
+fi
+echo "nginx-2 service floating IP: $NGINX2_IP"
+
+# check the tags
+NGINX2_FIP_TAG_USAGE=$(echo "$NGINX2_FIP_JSON" | jq -r '.tags.usage')
+if [ "$NGINX2_FIP_TAG_USAGE" != "cloud-provider-cherry-auto" ]; then
+    echo "nginx-2 service floating IP does not have correct usage tag, got: $NGINX2_FIP_TAG_USAGE"
+    exit 1
+fi
+NGINX2_FIP_TAG_CLUSTER=$(echo "$NGINX2_FIP_JSON" | jq -r '.tags.cluster')
+if [ "$NGINX2_FIP_TAG_CLUSTER" != "$CLUSTER_UID" ]; then
+    echo "nginx-2 service floating IP does not have correct cluster tag, got $NGINX2_FIP_TAG_CLUSTER, expected $CLUSTER_UID"
+    exit 1
+fi
+NGINX2_FIP_TAG_SERVICE=$(echo "$NGINX2_FIP_JSON" | jq -r '.tags.service')
+NGINX2_EXPECTED_SERVICE_TAG=$(print 'default/nginx-2' | sha256sum | awk '{print $1}' | xxd -r -p | base64)
+if [ "$NGINX2_FIP_TAG_SERVICE" != "$NGINX2_EXPECTED_SERVICE_TAG" ]; then
+    echo "nginx-2 service floating IP does not have correct service tag, got $NGINX2_FIP_TAG_SERVICE, expected $NGINX2_EXPECTED_SERVICE_TAG"
+    exit 1
+fi
+
+echo "nginx-2 service floating IP tags are correct"
+
+
+# see that svc1 still has a valid IP, and that it is distinct from svc2
+NGINX1_IP=$(kubectl get svc nginx-1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+if [ -z "$NGINX1_IP" ]; then
+    echo "nginx-1 service lost its external IP"
+    exit 1
+fi
+if [ "$NGINX1_IP" = "$NGINX2_IP" ]; then
+    echo "nginx-1 and nginx-2 services have the same external IP, expected distinct IPs"
+    exit 1
+fi
+
+# delete service 2, check that the FIP goes away, and that service 1 is unaffected
+kubectl delete -f "$MANIFESTS_DIR/nginx-2.yaml"
+# wait for the IP to go away
+echo "waiting for nginx-2 service external IP to be removed"
+PASSED=0
+INTERVAL=10
+FIP_WAIT=30
+SVC_GONE=false
+while [ $PASSED -lt $FIP_WAIT ]; do
+    NGINX2_FIP_JSON=$(cherryctl ip list -o json | jq -r '.[] | select(.address == "'$NGINX2_IP'")')
+    if [ -z "$NGINX2_FIP_JSON" ]; then
+        echo "nginx-2 service floating IP has been removed"
+        SVC_GONE=true
+        break
+    else
+        echo "nginx-2 service floating IP is still present, waiting $INTERVAL seconds..."
+        sleep $INTERVAL
+        PASSED=$(($PASSED + $INTERVAL))
+    fi
+done
+
+if [ "$SVC_GONE" != "true" ]; then
+    echo "nginx-2 service floating IP was not removed in $FIP_WAIT seconds after service deletion"
+    exit 1
+fi
+
+# check that svc1 is unaffected
+NGINX1_IP=$(kubectl get svc nginx-1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+if [ -z "$NGINX1_IP" ]; then
+    echo "nginx-1 service lost its external IP after nginx-2 deletion"
+    exit 1
+fi
+
+# delete service 1
+kubectl delete -f "$MANIFESTS_DIR/nginx-1.yaml"
+# wait for the IP to go away
+echo "waiting for nginx-1 service external IP to be removed"
+PASSED=0
+INTERVAL=10
+FIP_WAIT=30
+SVC_GONE=false
+while [ $PASSED -lt $FIP_WAIT ]; do
+    NGINX1_FIP_JSON=$(cherryctl ip list -o json | jq -r '.[] | select(.address == "'$NGINX1_IP'")')
+    if [ -z "$NGINX1_FIP_JSON" ]; then
+        echo "nginx-1 service floating IP has been removed"
+        SVC_GONE=true
+        break
+    else
+        echo "nginx-1 service floating IP is still present, waiting $INTERVAL seconds..."
+        sleep $INTERVAL
+        PASSED=$(($PASSED + $INTERVAL))
+    fi
+done
+if [ "$SVC_GONE" != "true" ]; then
+    echo "nginx-1 service floating IP was not removed in $FIP_WAIT seconds after service deletion"
+    exit 1
+fi
+echo "load balancer tests completed successfully"
+
+    

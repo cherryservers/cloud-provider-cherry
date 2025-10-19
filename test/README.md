@@ -93,7 +93,7 @@ Deploying metallb is describe on the [metallb home page](https://metallb.univers
 As of this writing, the only thing you need to do is:
 
 ```sh
-METALLB_VERSION=$(curl -sL https://api.github.com/repos/metallb/metallb/releases | jq -r ".[0].name")
+METALLB_VERSION=$(curl -sL https://api.github.com/repos/metallb/metallb/releases | jq -r ".[0].tag_name")
 kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/${METALLB_VERSION}/config/manifests/metallb-native.yaml
 ```
 
