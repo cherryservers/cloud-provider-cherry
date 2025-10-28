@@ -1,0 +1,13 @@
+#cloud-config
+snap:
+  commands:
+    00: snap install microk8s --classic
+write_files:
+  - content: "cloud-provider=external\n"
+    path: /var/snap/microk8s/current/args/kubelet
+    append: true
+    defer: true
+runcmd:
+  - [ microk8s stop ]
+  - [ microk8s start ]
+  - [ microk8s status --wait-ready]
