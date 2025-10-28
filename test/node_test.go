@@ -43,7 +43,7 @@ func untilNodeGone(ctx context.Context, n corev1.Node) error {
 func TestNodeAddDelete(t *testing.T) {
 	ctx := t.Context()
 
-	n, err := nodeProvisionerFixture.provision(ctx)
+	n, err := nodeProvisionerFixture.Provision(ctx)
 	if err != nil {
 		t.Fatalf("failed to provision node: %v", err)
 	}

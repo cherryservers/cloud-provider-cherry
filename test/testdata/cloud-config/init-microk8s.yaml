@@ -8,6 +8,4 @@ write_files:
     append: true
     defer: true
 runcmd:
-  - [ microk8s stop ]
-  - [ microk8s start ]
-  - [ microk8s status --wait-ready]
+  - [ bash, -lc, 'export PATH="$PATH:/snap/bin"; microk8s stop; microk8s start; microk8s status --wait-ready' ]

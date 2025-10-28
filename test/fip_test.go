@@ -34,7 +34,7 @@ func TestControlPlaneFip(t *testing.T) {
 		t.Fatalf("fip didn't get attached to cp node: %v", err)
 	}
 
-	nodes, errs := nodeProvisionerFixture.provisionMany(ctx, 2)
+	nodes, errs := nodeProvisionerFixture.ProvisionMany(ctx, 2)
 	for _, err := range errs {
 		if err != nil {
 			t.Fatalf("failed to provision node: %v", err)

@@ -35,23 +35,24 @@ import (
 )
 
 const (
-	apiTokenVar           = "CHERRY_TEST_API_TOKEN"
-	teamIDVar             = "CHERRY_TEST_TEAM_ID"
-	serverImage           = "ubuntu_24_04_64bit"
-	serverPlan            = "B1-4-4gb-80s-shared"
-	region                = "LT-Siauliai"
-	fipTag                = "kubernetes-ccm-test"
-	userDataPath          = "./testdata/cloud-config/init-microk8s.yaml"
-	resyncPeriod          = 5 * time.Second
-	eventTimeout          = 90 * time.Second
-	provisionTimeout      = 513 * time.Second
-	joinTimeout           = 210 * time.Second
-	controlPlaneNodeLabel = "node-role.kubernetes.io/control-plane"
+	apiTokenVar             = "CHERRY_TEST_API_TOKEN"
+	teamIDVar               = "CHERRY_TEST_TEAM_ID"
+	serverImage             = "ubuntu_24_04_64bit"
+	serverPlan              = "B1-4-4gb-80s-shared"
+	region                  = "LT-Siauliai"
+	fipTag                  = "kubernetes-ccm-test"
+	userDataPath            = "./testdata/cloud-config/init-microk8s.yaml"
+	userDataPathWithMetalLB = "./testdata/cloud-config/init-microk8s-with-metallb.yaml"
+	resyncPeriod            = 5 * time.Second
+	eventTimeout            = 90 * time.Second
+	provisionTimeout        = 513 * time.Second
+	joinTimeout             = 210 * time.Second
+	controlPlaneNodeLabel   = "node-role.kubernetes.io/control-plane"
 )
 
 var cherryClientFixture *cherrygo.Client
 var k8sClientFixture kubernetes.Interface
-var nodeProvisionerFixture *nodeProvisioner
+var nodeProvisionerFixture manyNodeProvisioner
 var cpNodeFixture *node
 var fipFixture *cherrygo.IPAddress
 var teamIDFixture *int
@@ -299,19 +300,28 @@ func (n *node) addCpLabel(ctx context.Context) error {
 	}, defaultExpBackoffConfigWithContext(ctx))
 }
 
-type nodeProvisioner struct {
+type nodeProvisioner interface {
+	Provision(ctx context.Context) (*node, error)
+}
+
+type manyNodeProvisioner interface {
+	nodeProvisioner
+	ProvisionMany(ctx context.Context, n int) ([]*node, []error)
+}
+
+type microk8sNodeProvisioner struct {
 	cherryClient cherrygo.Client
 	projectID    int
 	sshKeyID     string
 	cmdRunner    sshCmdRunner
 }
 
-func newNodeProvisioner(client cherrygo.Client, projectID int, sshKeyID string, cmdRunner sshCmdRunner) nodeProvisioner {
-	return nodeProvisioner{client, projectID, sshKeyID, cmdRunner}
+// Provision creates a Cherry Servers server and waits for k8s to be running.
+func (np microk8sNodeProvisioner) Provision(ctx context.Context) (*node, error) {
+	return np.provision(ctx, userDataPath)
 }
 
-// provision creates a Cherry Servers server and waits for k8s to be running.
-func (np nodeProvisioner) provision(ctx context.Context) (*node, error) {
+func (np microk8sNodeProvisioner) provision(ctx context.Context, userDataPath string) (*node, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, provisionTimeout, errors.New("node provision timeout"))
 	defer cancel()
 
@@ -361,12 +371,11 @@ func (np nodeProvisioner) provision(ctx context.Context) (*node, error) {
 	n := node{srv, np.cmdRunner, ""}
 	n.addCpLabel(ctx)
 	return &n, nil
-
 }
 
-// provisionMany wraps provision to create n Cherry Servers servers
+// ProvisionMany wraps provision to create n Cherry Servers servers
 // in a concurrent manner.
-func (np nodeProvisioner) provisionMany(ctx context.Context, n int) ([]*node, []error) {
+func (np microk8sNodeProvisioner) ProvisionMany(ctx context.Context, n int) ([]*node, []error) {
 	type p struct {
 		nn  *node
 		err error
@@ -378,7 +387,7 @@ func (np nodeProvisioner) provisionMany(ctx context.Context, n int) ([]*node, []
 
 	for range n {
 		go func() {
-			nn, err := np.provision(ctx)
+			nn, err := np.Provision(ctx)
 			c <- p{nn: nn, err: err}
 		}()
 	}
@@ -389,6 +398,15 @@ func (np nodeProvisioner) provisionMany(ctx context.Context, n int) ([]*node, []
 
 	}
 	return nodes, errs
+}
+
+type microk8sMetalLBNodeProvisioner struct {
+	microk8sNodeProvisioner
+}
+
+// Provision creates a Cherry Servers server and waits for k8s and metallb to be running.
+func (np microk8sMetalLBNodeProvisioner) Provision(ctx context.Context) (*node, error) {
+	return np.provision(ctx, userDataPathWithMetalLB)
 }
 
 func serverPublicIP(srv cherrygo.Server) (string, error) {
@@ -451,6 +469,12 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 	} else {
 		go io.Copy(log.Writer(), stderr)
 	}
+
+	// Need this for metallb client, which doesn't build
+	// from the controller client builder and doesn't get the
+	// flags from the command line.
+	env := append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", kubeconfig))
+	cmd.Env = env
 
 	err = cmd.Start()
 	if err != nil {
@@ -525,12 +549,14 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	}
 	//defer cherryClientFixture.Projects.Delete(project.ID)
 
-	np := newNodeProvisioner(*cherryClientFixture, project.ID, strconv.Itoa(sshKey.ID), *sshRunner)
-	cpNode, err := np.provision(ctx)
+	np := microk8sNodeProvisioner{
+		*cherryClientFixture, project.ID, strconv.Itoa(sshKey.ID), *sshRunner,
+	}
+	cpNode, err := np.Provision(ctx)
 	if err != nil {
 		return 1, fmt.Errorf("failed to provision k8s control plane node: %w", err)
 	}
-	nodeProvisionerFixture = &np
+	nodeProvisionerFixture = np
 	cpNodeFixture = cpNode
 
 	kubeconfig, cleanup, err := cpNode.kubeconfig()
@@ -566,7 +592,7 @@ func runMain(ctx context.Context, m *testing.M) (code int, err error) {
 	if err != nil {
 		return 1, fmt.Errorf("failed to start ccm: %w", err)
 	}
-	go func(){
+	go func() {
 		<-stoppedCh
 		stop()
 	}()

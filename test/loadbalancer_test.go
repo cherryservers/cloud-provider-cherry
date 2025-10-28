@@ -29,6 +29,11 @@ import (
 	"k8s.io/client-go/tools/watch"
 )
 
+const (
+	metallbSetting = "metallb:///"
+	kubeVipSetting = "kube-vip://"
+)
+
 func setupProject(t testing.TB, name string) cherrygo.Project {
 	t.Helper()
 
@@ -38,12 +43,12 @@ func setupProject(t testing.TB, name string) cherrygo.Project {
 		t.Fatalf("failed to setup cherry servers project: %v", err)
 	}
 	t.Cleanup(func() {
-		cherryClientFixture.Projects.Delete(project.ID)
+		//cherryClientFixture.Projects.Delete(project.ID)
 	})
 	return project
 }
 
-func setupNodeProvisioner(t testing.TB, testName string, projectID int) nodeProvisioner {
+func setupMicrok8sNodeProvisioner(t testing.TB, testName string, projectID int) microk8sNodeProvisioner {
 	t.Helper()
 
 	// Create a SSH key signer:
@@ -65,12 +70,17 @@ func setupNodeProvisioner(t testing.TB, testName string, projectID int) nodeProv
 	t.Cleanup(func() {
 		cherryClientFixture.SSHKeys.Delete(sshKey.ID)
 	})
-	return nodeProvisioner{
+	return microk8sNodeProvisioner{
 		cherryClient: *cherryClientFixture,
 		projectID:    projectID,
 		sshKeyID:     strconv.Itoa(sshKey.ID),
 		cmdRunner:    *sshRunner,
 	}
+}
+
+func setupMicrok8sMetalLBNodeProvisioner(t testing.TB, testName string, projectID int) microk8sMetalLBNodeProvisioner {
+	p := setupMicrok8sNodeProvisioner(t, testName, projectID)
+	return microk8sMetalLBNodeProvisioner{microk8sNodeProvisioner: p}
 }
 
 func setupKubeConfig(t testing.TB, n node) string {
@@ -101,9 +111,7 @@ func setupCcmSecret(t testing.TB, ccmCfg ccm.Config) string {
 
 type testEnv struct {
 	project         cherrygo.Project
-	nodeProvisioner nodeProvisioner
 	mainNode        node
-	kubeconfig      string // path
 	k8sClient       kubernetes.Interface
 }
 
@@ -120,10 +128,15 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	project := setupProject(t, cfg.name)
 
 	// Setup node provisioner:
-	np := setupNodeProvisioner(t, cfg.name, project.ID)
+	var np nodeProvisioner
+	if cfg.loadBalancer != metallbSetting {
+		np = setupMicrok8sNodeProvisioner(t, cfg.name, project.ID)
+	} else {
+		np = setupMicrok8sMetalLBNodeProvisioner(t, cfg.name, project.ID)
+	}
 
 	// Create a node (server with k8s running):
-	node, err := np.provision(t.Context())
+	node, err := np.Provision(t.Context())
 	if err != nil {
 		t.Fatalf("failed to provision test node: %v", err)
 	}
@@ -164,9 +177,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 
 	return &testEnv{
 		project:         project,
-		nodeProvisioner: np,
 		mainNode:        *node,
-		kubeconfig:      kubeCfg,
 		k8sClient:       client,
 	}
 }
@@ -701,12 +712,35 @@ func untilFipCount(ctx context.Context, t *testing.T, projectID, count int) erro
 	}, defaultExpBackoffConfigWithContext(fipRemovedCtx))
 }
 
+func TestMetalLB(t *testing.T) {
+	const testName = "kubernetes-ccm-test-lb-metal-lb"
+	const namespace = metav1.NamespaceDefault
+	ctx := t.Context()
+
+	env := setupTestEnv(ctx, t, testEnvConfig{
+		name: testName, loadBalancer: metallbSetting,
+	})
+
+	kubeHelper := kubeObjectHelpers{t, env.k8sClient}
+
+	testDeployment := kubeHelper.setupNginx(ctx, namespace)
+	selector := testDeployment.Spec.Selector.MatchLabels
+
+	kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
+		name:      "example-service-1",
+		namespace: namespace,
+		selector:  selector,
+	})
+
+	kubeHelper.untilLoadBalancerEnsured(ctx, "example-service-1", namespace)
+}
+
 func TestKubeVip(t *testing.T) {
 	const testName = "kubernetes-ccm-test-lb-kube-vip"
 	ctx := t.Context()
 
 	env := setupTestEnv(ctx, t, testEnvConfig{
-		name: testName, loadBalancer: "kube-vip://",
+		name: testName, loadBalancer: kubeVipSetting,
 	})
 
 	// We need a local ASN to deploy kube-vip.
