@@ -43,7 +43,7 @@ func setupProject(t testing.TB, name string) cherrygo.Project {
 		t.Fatalf("failed to setup cherry servers project: %v", err)
 	}
 	t.Cleanup(func() {
-		//cherryClientFixture.Projects.Delete(project.ID)
+		cherryClientFixture.Projects.Delete(project.ID)
 	})
 	return project
 }
@@ -110,9 +110,9 @@ func setupCcmSecret(t testing.TB, ccmCfg ccm.Config) string {
 }
 
 type testEnv struct {
-	project         cherrygo.Project
-	mainNode        node
-	k8sClient       kubernetes.Interface
+	project   cherrygo.Project
+	mainNode  node
+	k8sClient kubernetes.Interface
 }
 
 type testEnvConfig struct {
@@ -176,9 +176,9 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	})
 
 	return &testEnv{
-		project:         project,
-		mainNode:        *node,
-		k8sClient:       client,
+		project:   project,
+		mainNode:  *node,
+		k8sClient: client,
 	}
 }
 
@@ -538,7 +538,7 @@ func (k *kubeObjectHelpers) loadBalancerFipTags(ctx context.Context, svc *corev1
 	}
 }
 
-func (k *kubeObjectHelpers) untilLoadBalancerEnsured(ctx context.Context, name, namespace string) {
+func (k *kubeObjectHelpers) untilLoadBalancerEnsured(ctx context.Context, lb corev1.Service, namespace string) corev1.Service {
 	k.t.Helper()
 	lw := cache.NewListWatchFromClient(k.client.CoreV1().RESTClient(), "services", namespace, fields.Everything())
 
@@ -547,18 +547,21 @@ func (k *kubeObjectHelpers) untilLoadBalancerEnsured(ctx context.Context, name, 
 		if !ok {
 			return false, fmt.Errorf("unexpected object type: %T", event.Object)
 		}
-		if svc.ObjectMeta.Name != name {
+		if svc.ObjectMeta.Name != lb.Name {
 			return false, nil
 		}
 		// LB should be ensured, when ingress is set.
 		if len(svc.Status.LoadBalancer.Ingress) > 0 {
+			lb = *svc
 			return true, nil
 		}
 		return false, nil
 	})
 	if err != nil {
-		k.t.Fatalf("ingress ip not set for load balancer %q: %v", name, err)
+		k.t.Fatalf("ingress ip not set for load balancer %q: %v", lb.Name, err)
 	}
+
+	return lb
 
 }
 
@@ -694,6 +697,25 @@ func (s loadBalancerSubTester) testNodeDoesntHaveAnnotations(ctx context.Context
 	})
 }
 
+func (s loadBalancerSubTester) testDistinctIngressIps(ctx context.Context, t *testing.T) {
+	t.Run("distinct sevice ips", func(t *testing.T) {
+		firstIp := s.firstSvc.Status.LoadBalancer.Ingress[0].IP
+		if firstIp == "" {
+			t.Errorf("first service has no ingress ip")
+		}
+
+		secondIp := s.secondSvc.Status.LoadBalancer.Ingress[0].IP
+		if secondIp == "" {
+			t.Errorf("second service has no ingress ip")
+		}
+
+		if firstIp == secondIp {
+			t.Errorf("both services have the same ingress ip: %s", firstIp)
+		}
+	})
+
+}
+
 func untilFipCount(ctx context.Context, t *testing.T, projectID, count int) error {
 	fipRemovedCtx, cancel := context.WithTimeout(ctx, eventTimeout)
 	defer cancel()
@@ -726,13 +748,67 @@ func TestMetalLB(t *testing.T) {
 	testDeployment := kubeHelper.setupNginx(ctx, namespace)
 	selector := testDeployment.Spec.Selector.MatchLabels
 
-	kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
+	firstSvc := kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
 		name:      "example-service-1",
 		namespace: namespace,
 		selector:  selector,
 	})
 
-	kubeHelper.untilLoadBalancerEnsured(ctx, "example-service-1", namespace)
+	*firstSvc = kubeHelper.untilLoadBalancerEnsured(ctx, *firstSvc, namespace)
+
+	secondSvc := kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
+		name:      "example-service-2",
+		namespace: namespace,
+		selector:  selector,
+	})
+
+	*secondSvc = kubeHelper.untilLoadBalancerEnsured(ctx, *secondSvc, namespace)
+
+	subtester := loadBalancerSubTester{
+		firstSvc:  firstSvc,
+		secondSvc: secondSvc,
+		env:       env,
+	}
+
+	subtester.testFipTags(ctx, t)
+	subtester.testServerBgpEnabled(ctx, t)
+	subtester.testProjectBgpEnabled(ctx, t)
+	subtester.testDistinctIngressIps(ctx, t)
+
+	t.Run("remove first service", func(t *testing.T) {
+		secondSvcIp := secondSvc.Status.LoadBalancer.Ingress[0].IP
+
+		err := env.k8sClient.CoreV1().Services(namespace).Delete(ctx, firstSvc.Name, metav1.DeleteOptions{})
+		if err != nil {
+			t.Fatalf("failed to delete service %q: %v", firstSvc.Name, err)
+		}
+		err = untilFipCount(ctx, t, env.project.ID, 1)
+		if err != nil {
+			t.Errorf("fip count not reduced after service removal: %v", err)
+		}
+
+		secondSvc, err = env.k8sClient.CoreV1().Services(namespace).Get(ctx, secondSvc.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get service: %v", err)
+		}
+
+		got, want := secondSvc.Status.LoadBalancer.Ingress[0].IP, secondSvcIp
+		if got != want {
+			t.Errorf("second service's ip changed after deleting first: from %s to %s", want, got)
+		}
+	})
+
+	t.Run("remove second service", func(t *testing.T) {
+		err := env.k8sClient.CoreV1().Services(namespace).Delete(ctx, secondSvc.Name, metav1.DeleteOptions{})
+		if err != nil {
+			t.Fatalf("failed to delete service %q: %v", secondSvc.Name, err)
+		}
+		err = untilFipCount(ctx, t, env.project.ID, 0)
+		if err != nil {
+			t.Errorf("fip count not reduced after service removal: %v", err)
+		}
+	})
+
 }
 
 func TestKubeVip(t *testing.T) {
@@ -766,7 +842,7 @@ func TestKubeVip(t *testing.T) {
 		selector:  selector,
 	})
 
-	kubeHelper.untilLoadBalancerEnsured(ctx, "example-service-1", namespace)
+	*firstSvc = kubeHelper.untilLoadBalancerEnsured(ctx, *firstSvc, namespace)
 
 	secondSvc := kubeHelper.setupLoadBalancer(ctx, loadBalancerConfig{
 		name:      "example-service-2",
@@ -774,7 +850,7 @@ func TestKubeVip(t *testing.T) {
 		selector:  selector,
 	})
 
-	kubeHelper.untilLoadBalancerEnsured(ctx, "example-service-2", namespace)
+	*secondSvc = kubeHelper.untilLoadBalancerEnsured(ctx, *secondSvc, namespace)
 
 	subtester := loadBalancerSubTester{
 		firstSvc:  firstSvc,
@@ -788,6 +864,8 @@ func TestKubeVip(t *testing.T) {
 	subtester.testNodeHasAnnotations(ctx, t)
 
 	t.Run("remove first service", func(t *testing.T) {
+		secondSvcIp := secondSvc.Status.LoadBalancer.Ingress[0].IP
+
 		err := env.k8sClient.CoreV1().Services(namespace).Delete(ctx, firstSvc.Name, metav1.DeleteOptions{})
 		if err != nil {
 			t.Fatalf("failed to delete service %q: %v", firstSvc.Name, err)
@@ -797,10 +875,20 @@ func TestKubeVip(t *testing.T) {
 			t.Errorf("fip count not reduced after service removal: %v", err)
 		}
 
+		secondSvc, err = env.k8sClient.CoreV1().Services(namespace).Get(ctx, secondSvc.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get service: %v", err)
+		}
+
+		got, want := secondSvc.Status.LoadBalancer.Ingress[0].IP, secondSvcIp
+		if got != want {
+			t.Errorf("second service's ip changed after deleting first: from %s to %s", want, got)
+		}
+
 		subtester.testNodeHasAnnotations(ctx, t)
 	})
 
-	t.Run("remove second services", func(t *testing.T) {
+	t.Run("remove second service", func(t *testing.T) {
 		err := env.k8sClient.CoreV1().Services(namespace).Delete(ctx, secondSvc.Name, metav1.DeleteOptions{})
 		if err != nil {
 			t.Fatalf("failed to delete service %q: %v", secondSvc.Name, err)
