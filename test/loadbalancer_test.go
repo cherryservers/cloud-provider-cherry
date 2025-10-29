@@ -812,7 +812,11 @@ func TestMetalLB(t *testing.T) {
 
 }
 
-func TestKubeVip(t *testing.T) {
+// kube-vip and node annotations tests are combined,
+// since we don't want to have to provision infrastructure
+// just to check if nodes get bgp annotations, even though
+// it's not part of the kube-vip load balancer implementation.
+func TestKubeVipAndNodeAnnotations(t *testing.T) {
 	t.Parallel()
 	const testName = "kubernetes-ccm-test-lb-kube-vip"
 	ctx := t.Context()
