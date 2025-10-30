@@ -55,7 +55,7 @@ func TestNodeAddDelete(t *testing.T) {
 		t.Fatalf("failed to provision node: %v", err)
 	}
 
-	err = env.mainNode.Join(ctx, *n, env.k8sClient)
+	err = env.mainNode.Join(ctx, n, env.k8sClient)
 	if err != nil {
 		t.Fatalf("failed to join nodes: %v", err)
 	}

@@ -188,12 +188,12 @@ func untilNodeReady(ctx context.Context, n Node, k8sclient kubernetes.Interface)
 }
 
 type NodeProvisioner interface {
-	Provision(ctx context.Context) (*Node, error)
+	Provision(ctx context.Context) (Node, error)
 }
 
 type ManyNodeProvisioner interface {
 	NodeProvisioner
-	ProvisionMany(ctx context.Context, n int) ([]*Node, []error)
+	ProvisionMany(ctx context.Context, n int) ([]Node, []error)
 }
 
 type Microk8sNodeProvisioner struct {
@@ -204,17 +204,17 @@ type Microk8sNodeProvisioner struct {
 }
 
 // Provision creates a Cherry Servers server and waits for k8s to be running.
-func (np Microk8sNodeProvisioner) Provision(ctx context.Context) (*Node, error) {
+func (np Microk8sNodeProvisioner) Provision(ctx context.Context) (Node, error) {
 	return np.provision(ctx, userDataPath)
 }
 
-func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath string) (*Node, error) {
+func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath string) (Node, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, provisionTimeout, errors.New("node provision timeout"))
 	defer cancel()
 
 	userDataRaw, err := os.ReadFile(userDataPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read user data file: %w", err)
+		return Node{}, fmt.Errorf("failed to read user data file: %w", err)
 	}
 
 	srv, _, err := np.CherryClient.Servers.Create(&cherrygo.CreateServer{
@@ -227,7 +227,7 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create server: %w", err)
+		return Node{}, fmt.Errorf("failed to create server: %w", err)
 	}
 
 	backoff.ExpBackoffWithContext(func() (bool, error) {
@@ -243,7 +243,7 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 
 	ip, err := serverPublicIP(srv)
 	if err != nil {
-		return nil, err
+		return Node{}, err
 	}
 
 	backoff.ExpBackoffWithContext(func() (bool, error) {
@@ -257,18 +257,18 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 
 	n := Node{srv, np.CmdRunner, ""}
 	n.addCpLabel(ctx)
-	return &n, nil
+	return n, nil
 }
 
 // ProvisionMany wraps provision to create n Cherry Servers servers
 // in a concurrent manner.
-func (np Microk8sNodeProvisioner) ProvisionMany(ctx context.Context, n int) ([]*Node, []error) {
+func (np Microk8sNodeProvisioner) ProvisionMany(ctx context.Context, n int) ([]Node, []error) {
 	type p struct {
-		nn  *Node
+		nn  Node
 		err error
 	}
 
-	nodes := make([]*Node, n)
+	nodes := make([]Node, n)
 	errs := make([]error, n)
 	c := make(chan p, n)
 
@@ -292,7 +292,7 @@ type Microk8sMetalLBNodeProvisioner struct {
 }
 
 // Provision creates a Cherry Servers server and waits for k8s and metallb to be running.
-func (np Microk8sMetalLBNodeProvisioner) Provision(ctx context.Context) (*Node, error) {
+func (np Microk8sMetalLBNodeProvisioner) Provision(ctx context.Context) (Node, error) {
 	return np.provision(ctx, userDataPathWithMetalLB)
 }
 

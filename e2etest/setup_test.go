@@ -132,7 +132,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	}
 
 	// Get node kubeconfig:
-	kubeCfg := setupKubeConfig(t, *n)
+	kubeCfg := setupKubeConfig(t, n)
 
 	client, err := newK8sClient(kubeCfg)
 	if err != nil {
@@ -167,7 +167,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 
 	return &testEnv{
 		project:   project,
-		mainNode:  *n,
+		mainNode:  n,
 		k8sClient: client,
 		nodeProvisioner: np,
 	}
