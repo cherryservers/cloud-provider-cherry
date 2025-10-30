@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/cherryservers/cherrygo/v3"
+	ccm "github.com/cherryservers/cloud-provider-cherry/cherry"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/informers"
@@ -472,4 +474,35 @@ func runCcm(ctx context.Context, kubeconfig, secret string, k8sClient kubernetes
 	factory.Shutdown()
 
 	return stoppedCh, nil
+}
+
+// ccmSecret generates the secret required for CCM deployment
+// and returns a path to a temp file with it.
+func ccmSecret(cfg ccm.Config) (path string, cleanup func(), err error) {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to marshall secret to json: %w", err)
+	}
+
+	f, err := os.CreateTemp("", "ccm-secret-*.json")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create temp file for secret: %w", err)
+	}
+	path = f.Name()
+	cleanup = fileCleanup(path)
+
+	_, err = f.Write(data)
+	if err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("failed to write secret to file: %w", err)
+	}
+
+	err = f.Close()
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("failed to close secret file: %w", err)
+	}
+
+	return path, cleanup, nil
 }
