@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cherryservers/cloud-provider-cherry-tests/node"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -73,7 +72,7 @@ func TestNodeAddDelete(t *testing.T) {
 	}
 
 	// check metadata
-	if got, want := k8sn.Labels["topology.kubernetes.io/region"], node.Region; got != want {
+	if got, want := k8sn.Labels["topology.kubernetes.io/region"], n.Server.Region.Name; got != want {
 		t.Errorf("got region %q, want %q", got, want)
 	}
 
