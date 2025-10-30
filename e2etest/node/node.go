@@ -1,4 +1,4 @@
-package e2etest
+package node
 
 import (
 	"context"
@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cherryservers/cherrygo/v3"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/cherryservers/cloud-provider-cherry-tests/backoff"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -27,36 +29,36 @@ const (
 	userDataPath            = "./testdata/init-microk8s.yaml"
 	userDataPathWithMetalLB = "./testdata/init-microk8s-with-metallb.yaml"
 	serverImage             = "ubuntu_24_04_64bit"
-	serverPlan              = "B1-4-4gb-80s-shared"
-	region                  = "LT-Siauliai"
+	ServerPlan              = "B1-4-4gb-80s-shared"
+	Region                  = "LT-Siauliai"
 )
 
-type node struct {
-	server         cherrygo.Server
-	cmdRunner      sshCmdRunner
-	kubeconfigPath string
+type Node struct {
+	Server         cherrygo.Server
+	CmdRunner      sshCmdRunner
+	KubeconfigPath string
 }
 
-// runCmd runs a shell command on the node via SSH.
-func (n node) runCmd(cmd string) (resp string, err error) {
-	ip, err := serverPublicIP(n.server)
+// RunCmd runs a shell command on the node via SSH.
+func (n Node) RunCmd(cmd string) (resp string, err error) {
+	ip, err := serverPublicIP(n.Server)
 	if err != nil {
 		return "", err
 	}
-	return n.cmdRunner.run(ip, cmd)
+	return n.CmdRunner.run(ip, cmd)
 }
 
-// join joins newNode to the base node's cluster.
+// Join joins newNode to the base node's cluster.
 // Blocks until the node is ready.
-func (n *node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface) error {
+func (n *Node) Join(ctx context.Context, nn Node, k8sclient kubernetes.Interface) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, joinTimeout, errors.New("node join timeout"))
 	defer cancel()
 
-	r, err := n.runCmd("microk8s add-node")
+	r, err := n.RunCmd("microk8s add-node")
 	if err != nil {
 		return fmt.Errorf("couldn't get join URL from control plane node: %w", err)
 	}
-	ip, err := serverPublicIP(n.server)
+	ip, err := serverPublicIP(n.Server)
 	if err != nil {
 		return err
 	}
@@ -70,7 +72,7 @@ func (n *node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface
 		}
 	}
 
-	_, err = nn.runCmd(joinCmd)
+	_, err = nn.RunCmd(joinCmd)
 	if err != nil {
 		return fmt.Errorf("couldn't execute join cmd: %w", err)
 	}
@@ -79,15 +81,15 @@ func (n *node) join(ctx context.Context, nn node, k8sclient kubernetes.Interface
 	return untilNodeReady(ctx, nn, k8sclient)
 }
 
-// joinMany wraps join to join multiply nodes to the base node
+// JoinMany wraps join to join multiply nodes to the base node
 // in a concurrent manner.
-func (n *node) joinMany(ctx context.Context, nodes []node, k8sclient kubernetes.Interface) []error {
+func (n *Node) JoinMany(ctx context.Context, nodes []Node, k8sclient kubernetes.Interface) []error {
 	errs := make([]error, len(nodes))
 	c := make(chan error, len(nodes))
 
 	for i := range len(nodes) {
 		go func() {
-			c <- n.join(ctx, nodes[i], k8sclient)
+			c <- n.Join(ctx, nodes[i], k8sclient)
 		}()
 	}
 
@@ -97,24 +99,24 @@ func (n *node) joinMany(ctx context.Context, nodes []node, k8sclient kubernetes.
 	return errs
 }
 
-// remove removes the provided node from the base node.
-func (n *node) remove(ctx context.Context, nn *node) error {
-	resp, err := n.runCmd("microk8s remove-node " + nn.server.Hostname + " --force")
+// Remove removes the provided node from the base node.
+func (n *Node) Remove(ctx context.Context, nn *Node) error {
+	resp, err := n.RunCmd("microk8s remove-node " + nn.Server.Hostname + " --force")
 	if err != nil {
 		return fmt.Errorf("failed to remove node: %v: %s", err, resp)
 	}
 	return nil
 }
 
-// kubeconfig generates a kubeconfig file from the node
+// Kubeconfig generates a Kubeconfig file from the node
 // and returns a path to it.
-func (n *node) kubeconfig() (path string, cleanup func(), err error) {
-	if n.kubeconfigPath != "" {
-		return n.kubeconfigPath, func() {}, nil
+func (n *Node) Kubeconfig() (path string, cleanup func(), err error) {
+	if n.KubeconfigPath != "" {
+		return n.KubeconfigPath, func() {}, nil
 	}
 	const cmd = "microk8s config"
 
-	k, err := n.runCmd(cmd)
+	k, err := n.RunCmd(cmd)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to run '%s': %w", cmd, err)
 	}
@@ -138,29 +140,29 @@ func (n *node) kubeconfig() (path string, cleanup func(), err error) {
 		return "", nil, fmt.Errorf("failed to close kubeconfig file: %w", err)
 	}
 
-	n.kubeconfigPath = path
+	n.KubeconfigPath = path
 	return path, cleanup, nil
 }
 
 // addCpLabel adds the well-known control plane label
 // to the node, since microk8s doesn't use it,
 // but we need it for fip reconciliation.
-func (n *node) addCpLabel(ctx context.Context) error {
-	ctx, cancel := context.WithTimeoutCause(ctx, 64*time.Second, fmt.Errorf("timed out on label apply for %s", n.server.Hostname))
+func (n *Node) addCpLabel(ctx context.Context) error {
+	ctx, cancel := context.WithTimeoutCause(ctx, 64*time.Second, fmt.Errorf("timed out on label apply for %s", n.Server.Hostname))
 	defer cancel()
 
-	return expBackoffWithContext(func() (bool, error) {
-		_, err := n.runCmd("microk8s kubectl label nodes " + n.server.Hostname +
+	return backoff.ExpBackoffWithContext(func() (bool, error) {
+		_, err := n.RunCmd("microk8s kubectl label nodes " + n.Server.Hostname +
 			" " + controlPlaneNodeLabel + "=\"\"")
 		if err != nil {
 			return false, nil
 		}
 		return true, nil
-	}, defaultExpBackoffConfigWithContext(ctx))
+	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 }
 
 // untilNodeReady watches the node until an event with ready status.
-func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface) error {
+func untilNodeReady(ctx context.Context, n Node, k8sclient kubernetes.Interface) error {
 	lw := cache.NewListWatchFromClient(k8sclient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
 
 	_, err := watch.UntilWithSync(ctx, lw, &corev1.Node{}, nil, func(event apiwatch.Event) (done bool, err error) {
@@ -168,7 +170,7 @@ func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface)
 		if !ok {
 			return false, fmt.Errorf("unexpected object type: %T", event.Object)
 		}
-		if node.ObjectMeta.Name != n.server.Hostname {
+		if node.ObjectMeta.Name != n.Server.Hostname {
 			return false, nil
 		}
 		for _, c := range node.Status.Conditions {
@@ -185,28 +187,28 @@ func untilNodeReady(ctx context.Context, n node, k8sclient kubernetes.Interface)
 	return nil
 }
 
-type nodeProvisioner interface {
-	Provision(ctx context.Context) (*node, error)
+type NodeProvisioner interface {
+	Provision(ctx context.Context) (*Node, error)
 }
 
-type manyNodeProvisioner interface {
-	nodeProvisioner
-	ProvisionMany(ctx context.Context, n int) ([]*node, []error)
+type ManyNodeProvisioner interface {
+	NodeProvisioner
+	ProvisionMany(ctx context.Context, n int) ([]*Node, []error)
 }
 
-type microk8sNodeProvisioner struct {
-	cherryClient cherrygo.Client
-	projectID    int
-	sshKeyID     string
-	cmdRunner    sshCmdRunner
+type Microk8sNodeProvisioner struct {
+	CherryClient cherrygo.Client
+	ProjectID    int
+	SshKeyID     string
+	CmdRunner    sshCmdRunner
 }
 
 // Provision creates a Cherry Servers server and waits for k8s to be running.
-func (np microk8sNodeProvisioner) Provision(ctx context.Context) (*node, error) {
+func (np Microk8sNodeProvisioner) Provision(ctx context.Context) (*Node, error) {
 	return np.provision(ctx, userDataPath)
 }
 
-func (np microk8sNodeProvisioner) provision(ctx context.Context, userDataPath string) (*node, error) {
+func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath string) (*Node, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, provisionTimeout, errors.New("node provision timeout"))
 	defer cancel()
 
@@ -215,21 +217,21 @@ func (np microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 		return nil, fmt.Errorf("failed to read user data file: %w", err)
 	}
 
-	srv, _, err := np.cherryClient.Servers.Create(&cherrygo.CreateServer{
-		ProjectID: np.projectID,
-		Plan:      serverPlan,
-		Region:    region,
+	srv, _, err := np.CherryClient.Servers.Create(&cherrygo.CreateServer{
+		ProjectID: np.ProjectID,
+		Plan:      ServerPlan,
+		Region:    Region,
 		Image:     serverImage,
 		UserData:  base64.StdEncoding.EncodeToString(userDataRaw),
-		SSHKeys:   []string{np.sshKeyID},
+		SSHKeys:   []string{np.SshKeyID},
 	})
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create server: %w", err)
 	}
 
-	expBackoffWithContext(func() (bool, error) {
-		srv, _, err = np.cherryClient.Servers.Get(srv.ID, nil)
+	backoff.ExpBackoffWithContext(func() (bool, error) {
+		srv, _, err = np.CherryClient.Servers.Get(srv.ID, nil)
 		if err != nil {
 			return false, fmt.Errorf("failed to get server: %w", err)
 		}
@@ -237,36 +239,36 @@ func (np microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 			return true, nil
 		}
 		return false, nil
-	}, defaultExpBackoffConfigWithContext(ctx))
+	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 
 	ip, err := serverPublicIP(srv)
 	if err != nil {
 		return nil, err
 	}
 
-	expBackoffWithContext(func() (bool, error) {
+	backoff.ExpBackoffWithContext(func() (bool, error) {
 		// Check if kube-api is reachable. Non-zero exit code will be returned if not.
-		_, err = np.cmdRunner.run(ip, "microk8s kubectl get nodes --no-headers")
+		_, err = np.CmdRunner.run(ip, "microk8s kubectl get nodes --no-headers")
 		if err != nil {
 			return false, nil
 		}
 		return true, nil
-	}, defaultExpBackoffConfigWithContext(ctx))
+	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 
-	n := node{srv, np.cmdRunner, ""}
+	n := Node{srv, np.CmdRunner, ""}
 	n.addCpLabel(ctx)
 	return &n, nil
 }
 
 // ProvisionMany wraps provision to create n Cherry Servers servers
 // in a concurrent manner.
-func (np microk8sNodeProvisioner) ProvisionMany(ctx context.Context, n int) ([]*node, []error) {
+func (np Microk8sNodeProvisioner) ProvisionMany(ctx context.Context, n int) ([]*Node, []error) {
 	type p struct {
-		nn  *node
+		nn  *Node
 		err error
 	}
 
-	nodes := make([]*node, n)
+	nodes := make([]*Node, n)
 	errs := make([]error, n)
 	c := make(chan p, n)
 
@@ -285,12 +287,12 @@ func (np microk8sNodeProvisioner) ProvisionMany(ctx context.Context, n int) ([]*
 	return nodes, errs
 }
 
-type microk8sMetalLBNodeProvisioner struct {
-	microk8sNodeProvisioner
+type Microk8sMetalLBNodeProvisioner struct {
+	Microk8sNodeProvisioner
 }
 
 // Provision creates a Cherry Servers server and waits for k8s and metallb to be running.
-func (np microk8sMetalLBNodeProvisioner) Provision(ctx context.Context) (*node, error) {
+func (np Microk8sMetalLBNodeProvisioner) Provision(ctx context.Context) (*Node, error) {
 	return np.provision(ctx, userDataPathWithMetalLB)
 }
 
@@ -301,5 +303,12 @@ func serverPublicIP(srv cherrygo.Server) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("server %d has no public ip", srv.ID)
+}
+
+func fileCleanup(path string) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() { os.Remove(path) })
+	}
 }
 

@@ -1,4 +1,4 @@
-package e2etest
+package node
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 )
 
 type sshCmdRunner struct {
-	signer ssh.Signer
+	Signer ssh.Signer
 }
 
 // run a command via SSH at the given address using bash.
@@ -20,7 +20,7 @@ func (s sshCmdRunner) run(addr, cmd string) (string, error) {
 
 	cfg := ssh.ClientConfig{
 		User:            "root",
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(s.signer)},
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(s.Signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 	client, err := ssh.Dial("tcp", addr+":"+port, &cfg)
@@ -46,7 +46,7 @@ func (s sshCmdRunner) run(addr, cmd string) (string, error) {
 	return b.String(), nil
 }
 
-func newSshCmdRunner() (*sshCmdRunner, error) {
+func NewSshCmdRunner() (*sshCmdRunner, error) {
 	_, pri, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ed25519 keys: %w", err)

@@ -15,6 +15,7 @@ import (
 
 	ccm "github.com/cherryservers/cloud-provider-cherry/cherry"
 	"k8s.io/client-go/tools/clientcmd"
+	"github.com/cherryservers/cloud-provider-cherry-tests/node"
 )
 
 const (
@@ -36,17 +37,17 @@ func setupProject(t testing.TB, name string) cherrygo.Project {
 	return project
 }
 
-func setupMicrok8sNodeProvisioner(t testing.TB, testName string, projectID int) microk8sNodeProvisioner {
+func setupMicrok8sNodeProvisioner(t testing.TB, testName string, projectID int) node.Microk8sNodeProvisioner {
 	t.Helper()
 
 	// Create a SSH key signer:
-	sshRunner, err := newSshCmdRunner()
+	sshRunner, err := node.NewSshCmdRunner()
 	if err != nil {
 		t.Fatalf("failed to create SSH runner: %v", err)
 	}
 
 	// Create SSH key on Cherry servers:
-	pub := ssh.MarshalAuthorizedKey(sshRunner.signer.PublicKey())
+	pub := ssh.MarshalAuthorizedKey(sshRunner.Signer.PublicKey())
 	pub = pub[:len(pub)-1] // strip newline
 	sshKey, _, err := cherryClient.SSHKeys.Create(&cherrygo.CreateSSHKey{
 		Label: testName,
@@ -58,23 +59,23 @@ func setupMicrok8sNodeProvisioner(t testing.TB, testName string, projectID int) 
 	t.Cleanup(func() {
 		cherryClient.SSHKeys.Delete(sshKey.ID)
 	})
-	return microk8sNodeProvisioner{
-		cherryClient: *cherryClient,
-		projectID:    projectID,
-		sshKeyID:     strconv.Itoa(sshKey.ID),
-		cmdRunner:    *sshRunner,
+	return node.Microk8sNodeProvisioner{
+		CherryClient: *cherryClient,
+		ProjectID:    projectID,
+		SshKeyID:     strconv.Itoa(sshKey.ID),
+		CmdRunner:    *sshRunner,
 	}
 }
 
-func setupMicrok8sMetalLBNodeProvisioner(t testing.TB, testName string, projectID int) microk8sMetalLBNodeProvisioner {
+func setupMicrok8sMetalLBNodeProvisioner(t testing.TB, testName string, projectID int) node.Microk8sMetalLBNodeProvisioner {
 	p := setupMicrok8sNodeProvisioner(t, testName, projectID)
-	return microk8sMetalLBNodeProvisioner{microk8sNodeProvisioner: p}
+	return node.Microk8sMetalLBNodeProvisioner{Microk8sNodeProvisioner: p}
 }
 
-func setupKubeConfig(t testing.TB, n node) string {
+func setupKubeConfig(t testing.TB, n node.Node) string {
 	t.Helper()
 
-	cfg, cleanup, err := n.kubeconfig()
+	cfg, cleanup, err := n.Kubeconfig()
 	if err != nil {
 		t.Fatalf("failed to generate kubeconfig: %v", err)
 	}
@@ -99,8 +100,8 @@ func setupCcmSecret(t testing.TB, ccmCfg ccm.Config) string {
 
 type testEnv struct {
 	project   cherrygo.Project
-	mainNode  node
-	nodeProvisioner nodeProvisioner
+	mainNode  node.Node
+	nodeProvisioner node.NodeProvisioner
 	k8sClient kubernetes.Interface
 }
 
@@ -117,7 +118,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	project := setupProject(t, cfg.name)
 
 	// Setup node provisioner:
-	var np nodeProvisioner
+	var np node.NodeProvisioner
 	if cfg.loadBalancer != metallbSetting {
 		np = setupMicrok8sNodeProvisioner(t, cfg.name, project.ID)
 	} else {
@@ -125,13 +126,13 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	}
 
 	// Create a node (server with k8s running):
-	node, err := np.Provision(t.Context())
+	n, err := np.Provision(t.Context())
 	if err != nil {
 		t.Fatalf("failed to provision test node: %v", err)
 	}
 
 	// Get node kubeconfig:
-	kubeCfg := setupKubeConfig(t, *node)
+	kubeCfg := setupKubeConfig(t, *n)
 
 	client, err := newK8sClient(kubeCfg)
 	if err != nil {
@@ -141,7 +142,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	// Generate config secret for CCM:
 	secret := setupCcmSecret(t, ccm.Config{
 		AuthToken:           cherryClient.AuthToken,
-		Region:              region,
+		Region:              node.Region,
 		LoadBalancerSetting: cfg.loadBalancer,
 		FIPTag:              cfg.fipTag,
 		ProjectID:           project.ID})
@@ -166,7 +167,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 
 	return &testEnv{
 		project:   project,
-		mainNode:  *node,
+		mainNode:  *n,
 		k8sClient: client,
 		nodeProvisioner: np,
 	}

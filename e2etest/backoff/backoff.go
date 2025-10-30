@@ -1,4 +1,4 @@
-package e2etest
+package backoff
 
 import (
 	"context"
@@ -20,7 +20,7 @@ type ExpBackoffConfig struct {
 	max   time.Duration
 }
 
-func defaultExpBackoffConfig() ExpBackoffConfig {
+func DefaultExpBackoffConfig() ExpBackoffConfig {
 	return ExpBackoffConfig{
 		start: 2 * time.Second,
 		exp:   2,
@@ -30,7 +30,7 @@ func defaultExpBackoffConfig() ExpBackoffConfig {
 
 // expBackoff retries f until it returns true, a non-nil error or
 // stop returns true.
-func expBackoff(f func() (bool, error), cfg ExpBackoffConfig, stop func() bool) error {
+func ExpBackoff(f func() (bool, error), cfg ExpBackoffConfig, stop func() bool) error {
 	dur := cfg.start
 	for !stop() {
 		r, err := f()
@@ -51,13 +51,13 @@ type ExpBackoffConfigWithContext struct {
 	ctx context.Context
 }
 
-func defaultExpBackoffConfigWithContext(ctx context.Context) ExpBackoffConfigWithContext {
-	return ExpBackoffConfigWithContext{ExpBackoffConfig: defaultExpBackoffConfig(), ctx: ctx}
+func DefaultExpBackoffConfigWithContext(ctx context.Context) ExpBackoffConfigWithContext {
+	return ExpBackoffConfigWithContext{ExpBackoffConfig: DefaultExpBackoffConfig(), ctx: ctx}
 }
 
 // expBackoffWithContext wraps expBackoff with a context.
-func expBackoffWithContext(f func() (bool, error), cfg ExpBackoffConfigWithContext) error {
-	err := expBackoff(f, cfg.ExpBackoffConfig, func() bool {
+func ExpBackoffWithContext(f func() (bool, error), cfg ExpBackoffConfigWithContext) error {
+	err := ExpBackoff(f, cfg.ExpBackoffConfig, func() bool {
 		return cfg.ctx.Err() != nil
 	})
 	switch {

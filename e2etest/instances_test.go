@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cherryservers/cloud-provider-cherry-tests/node"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -55,28 +56,28 @@ func TestNodeAddDelete(t *testing.T) {
 		t.Fatalf("failed to provision node: %v", err)
 	}
 
-	err = env.mainNode.join(ctx, *n, env.k8sClient)
+	err = env.mainNode.Join(ctx, *n, env.k8sClient)
 	if err != nil {
 		t.Fatalf("failed to join nodes: %v", err)
 	}
 
-	k8sn, err := env.k8sClient.CoreV1().Nodes().Get(ctx, n.server.Hostname, metav1.GetOptions{})
+	k8sn, err := env.k8sClient.CoreV1().Nodes().Get(ctx, n.Server.Hostname, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("failed to get node :%v", err)
 	}
 
 	// check provider id
-	wantProviderID := "cherryservers://" + strconv.Itoa(n.server.ID)
+	wantProviderID := "cherryservers://" + strconv.Itoa(n.Server.ID)
 	if got, want := k8sn.Spec.ProviderID, wantProviderID; got != want {
 		t.Errorf("got provider ID %q, want %q", got, want)
 	}
 
 	// check metadata
-	if got, want := k8sn.Labels["topology.kubernetes.io/region"], region; got != want {
+	if got, want := k8sn.Labels["topology.kubernetes.io/region"], node.Region; got != want {
 		t.Errorf("got region %q, want %q", got, want)
 	}
 
-	wantPlan := n.server.Plan.Slug
+	wantPlan := n.Server.Plan.Slug
 	if got, want := k8sn.Labels["node.kubernetes.io/instance-type"], wantPlan; got != want {
 		t.Errorf("got instance type %q, want %q", got, want)
 	}
@@ -84,12 +85,12 @@ func TestNodeAddDelete(t *testing.T) {
 	for _, address := range k8sn.Status.Addresses {
 		switch address.Type {
 		case corev1.NodeHostName:
-			if address.Address != n.server.Hostname {
-				t.Errorf("got hostname %q, want %q", address.Address, n.server.Hostname)
+			if address.Address != n.Server.Hostname {
+				t.Errorf("got hostname %q, want %q", address.Address, n.Server.Hostname)
 			}
 		case corev1.NodeExternalIP:
 			found := false
-			for _, srvAddress := range n.server.IPAddresses {
+			for _, srvAddress := range n.Server.IPAddresses {
 				if srvAddress.Address == address.Address && srvAddress.Type == "primary-ip" {
 					found = true
 				}
@@ -99,7 +100,7 @@ func TestNodeAddDelete(t *testing.T) {
 			}
 		case corev1.NodeInternalIP:
 			found := false
-			for _, srvAddress := range n.server.IPAddresses {
+			for _, srvAddress := range n.Server.IPAddresses {
 				if srvAddress.Address == address.Address && srvAddress.Type == "private-ip" {
 					found = true
 				}
@@ -112,7 +113,7 @@ func TestNodeAddDelete(t *testing.T) {
 	}
 
 	// node deletion
-	_, _, err = cherryClient.Servers.Delete(n.server.ID)
+	_, _, err = cherryClient.Servers.Delete(n.Server.ID)
 	if err != nil {
 		t.Fatalf("failed to delete server: %v", err)
 	}
