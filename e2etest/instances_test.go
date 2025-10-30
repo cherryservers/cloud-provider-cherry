@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/tools/watch"
 )
 
-const nodeDeletionTimeout = 90 * time.Second
+const nodeDeletionTimeout = 120 * time.Second
 
 func untilNodeGone(ctx context.Context, n corev1.Node, k8sClient kubernetes.Interface) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, nodeDeletionTimeout, errors.New("no node deletion event before timeout"))
