@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	apiwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/watch"
 )
 
@@ -34,9 +35,10 @@ const (
 )
 
 type Node struct {
-	Server         cherrygo.Server
-	CmdRunner      sshCmdRunner
-	KubeconfigPath string
+	Server    cherrygo.Server
+	K8sclient kubernetes.Interface
+	kubeconfigPath string
+	cmdRunner sshCmdRunner
 }
 
 // RunCmd runs a shell command on the node via SSH.
@@ -45,12 +47,12 @@ func (n Node) RunCmd(cmd string) (resp string, err error) {
 	if err != nil {
 		return "", err
 	}
-	return n.CmdRunner.run(ip, cmd)
+	return n.cmdRunner.run(ip, cmd)
 }
 
 // Join joins newNode to the base node's cluster.
 // Blocks until the node is ready.
-func (n *Node) Join(ctx context.Context, nn Node, k8sclient kubernetes.Interface) error {
+func (n *Node) Join(ctx context.Context, nn Node) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, joinTimeout, errors.New("node join timeout"))
 	defer cancel()
 
@@ -78,18 +80,18 @@ func (n *Node) Join(ctx context.Context, nn Node, k8sclient kubernetes.Interface
 	}
 
 	nn.addCpLabel(ctx)
-	return untilNodeReady(ctx, nn, k8sclient)
+	return n.untilReady(ctx)
 }
 
 // JoinMany wraps join to join multiply nodes to the base node
 // in a concurrent manner.
-func (n *Node) JoinMany(ctx context.Context, nodes []Node, k8sclient kubernetes.Interface) []error {
+func (n *Node) JoinMany(ctx context.Context, nodes []Node) []error {
 	errs := make([]error, len(nodes))
 	c := make(chan error, len(nodes))
 
 	for i := range len(nodes) {
 		go func() {
-			c <- n.Join(ctx, nodes[i], k8sclient)
+			c <- n.Join(ctx, nodes[i])
 		}()
 	}
 
@@ -111,8 +113,8 @@ func (n *Node) Remove(ctx context.Context, nn *Node) error {
 // Kubeconfig generates a Kubeconfig file from the node
 // and returns a path to it.
 func (n *Node) Kubeconfig() (path string, cleanup func(), err error) {
-	if n.KubeconfigPath != "" {
-		return n.KubeconfigPath, func() {}, nil
+	if n.kubeconfigPath != "" {
+		return n.kubeconfigPath, func() {}, nil
 	}
 	const cmd = "microk8s config"
 
@@ -140,7 +142,7 @@ func (n *Node) Kubeconfig() (path string, cleanup func(), err error) {
 		return "", nil, fmt.Errorf("failed to close kubeconfig file: %w", err)
 	}
 
-	n.KubeconfigPath = path
+	n.kubeconfigPath = path
 	return path, cleanup, nil
 }
 
@@ -161,9 +163,9 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 }
 
-// untilNodeReady watches the node until an event with ready status.
-func untilNodeReady(ctx context.Context, n Node, k8sclient kubernetes.Interface) error {
-	lw := cache.NewListWatchFromClient(k8sclient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
+// untilReady watches the node until an event with ready status.
+func(n *Node) untilReady(ctx context.Context) error {
+	lw := cache.NewListWatchFromClient(n.K8sclient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
 
 	_, err := watch.UntilWithSync(ctx, lw, &corev1.Node{}, nil, func(event apiwatch.Event) (done bool, err error) {
 		node, ok := event.Object.(*corev1.Node)
@@ -216,30 +218,12 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 	if err != nil {
 		return Node{}, fmt.Errorf("failed to read user data file: %w", err)
 	}
+	userdata := base64.StdEncoding.EncodeToString(userDataRaw)
 
-	srv, _, err := np.CherryClient.Servers.Create(&cherrygo.CreateServer{
-		ProjectID: np.ProjectID,
-		Plan:      ServerPlan,
-		Region:    Region,
-		Image:     serverImage,
-		UserData:  base64.StdEncoding.EncodeToString(userDataRaw),
-		SSHKeys:   []string{np.SshKeyID},
-	})
-
+	srv, err := provisionServer(ctx, np.CherryClient, np.ProjectID, userdata, np.SshKeyID)
 	if err != nil {
-		return Node{}, fmt.Errorf("failed to create server: %w", err)
+		return Node{}, fmt.Errorf("failed to provision server: %w", err)
 	}
-
-	backoff.ExpBackoffWithContext(func() (bool, error) {
-		srv, _, err = np.CherryClient.Servers.Get(srv.ID, nil)
-		if err != nil {
-			return false, fmt.Errorf("failed to get server: %w", err)
-		}
-		if srv.State == "active" {
-			return true, nil
-		}
-		return false, nil
-	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 
 	ip, err := serverPublicIP(srv)
 	if err != nil {
@@ -255,7 +239,17 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 		return true, nil
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 
-	n := Node{srv, np.CmdRunner, ""}
+	kubeconfig, err := np.CmdRunner.run(ip, "microk8s config")
+	if err != nil {
+		return Node{}, fmt.Errorf("failed to get k8s config: %w", err)
+	}
+
+	k8sclient, err := newK8sClient(kubeconfig)
+	if err != nil {
+		return Node{}, fmt.Errorf("failed to create k8s client: %w", err)
+	}
+
+	n := Node{Server: srv, cmdRunner: np.CmdRunner, K8sclient: k8sclient}
 	n.addCpLabel(ctx)
 	return n, nil
 }
@@ -303,6 +297,42 @@ func serverPublicIP(srv cherrygo.Server) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("server %d has no public ip", srv.ID)
+}
+
+func newK8sClient(kubeconfig string) (*kubernetes.Clientset, error) {
+	cfg, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
+	if err != nil {
+		return nil, err
+	}
+	return kubernetes.NewForConfig(cfg)
+}
+
+func provisionServer(ctx context.Context, cc cherrygo.Client, projectID int, userdata, sshkeyID string) (cherrygo.Server, error) {
+	srv, _, err := cc.Servers.Create(&cherrygo.CreateServer{
+		ProjectID: projectID,
+		Plan:      ServerPlan,
+		Region:    Region,
+		Image:     serverImage,
+		UserData:  userdata,
+		SSHKeys:   []string{sshkeyID},
+	})
+
+	if err != nil {
+		return cherrygo.Server{}, fmt.Errorf("failed to create server: %w", err)
+	}
+
+	backoff.ExpBackoffWithContext(func() (bool, error) {
+		srv, _, err = cc.Servers.Get(srv.ID, nil)
+		if err != nil {
+			return false, fmt.Errorf("failed to get server: %w", err)
+		}
+		if srv.State == "active" {
+			return true, nil
+		}
+		return false, nil
+	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
+
+	return srv, nil
 }
 
 func fileCleanup(path string) func() {

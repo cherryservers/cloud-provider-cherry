@@ -13,9 +13,9 @@ import (
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/cherryservers/cloud-provider-cherry-tests/node"
 	ccm "github.com/cherryservers/cloud-provider-cherry/cherry"
 	"k8s.io/client-go/tools/clientcmd"
-	"github.com/cherryservers/cloud-provider-cherry-tests/node"
 )
 
 const (
@@ -99,10 +99,10 @@ func setupCcmSecret(t testing.TB, ccmCfg ccm.Config) string {
 }
 
 type testEnv struct {
-	project   cherrygo.Project
-	mainNode  node.Node
+	project         cherrygo.Project
+	mainNode        node.Node
 	nodeProvisioner node.NodeProvisioner
-	k8sClient kubernetes.Interface
+	k8sClient       kubernetes.Interface
 }
 
 type testEnvConfig struct {
@@ -166,15 +166,15 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	})
 
 	return &testEnv{
-		project:   project,
-		mainNode:  n,
-		k8sClient: client,
+		project:         project,
+		mainNode:        n,
+		k8sClient:       client,
 		nodeProvisioner: np,
 	}
 }
 
 func newK8sClient(kubeconfig string) (*kubernetes.Clientset, error) {
-	cfg,err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build k8s config: %w", err)
 	}
