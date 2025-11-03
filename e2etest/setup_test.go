@@ -1,6 +1,7 @@
 package e2etest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -113,15 +114,25 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 		t.Fatalf("failed to load image to node")
 	}
 
-	client := n.K8sclient
-
-	configJSON, err := json.Marshal(ccm.Config{
+	deployCcm(ctx, t, n, ccm.Config{
 		AuthToken:           cherryClient.AuthToken,
 		Region:              node.Region,
 		LoadBalancerSetting: cfg.loadBalancer,
 		FIPTag:              cfg.fipTag,
 		ProjectID:           project.ID})
 
+	return &testEnv{
+		project:         project,
+		mainNode:        n,
+		k8sClient:       n.K8sclient,
+		nodeProvisioner: np,
+	}
+}
+
+func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
+	const imgTag = "ghcr.io/cherryservers/cloud-provider-cherry:test"
+
+	configJSON, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("failed to marshall ccm config: %v", err)
 	}
@@ -131,29 +142,26 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 		StringData: map[string]string{"cloud-sa.json": string(configJSON)},
 	}
 
-	client.CoreV1().Secrets(metav1.NamespaceSystem).Create(ctx, &secret, metav1.CreateOptions{})
+	n.K8sclient.CoreV1().Secrets(metav1.NamespaceSystem).Create(ctx, &secret, metav1.CreateOptions{})
 
-	manifest, err := os.Open("./testdata/ccm-manifest.yaml")
+	manifest, err := os.ReadFile("../deploy/template/deployment.yaml")
 	if err != nil {
-		t.Fatalf("failed to open manifest file: %v", err)
+		t.Fatalf("failed to read deployment manifest file: %v", err)
 	}
-	defer manifest.Close()
+	manifest = bytes.Replace(manifest, []byte("RELEASE_IMG"), []byte(imgTag), 1)
+	manifest = bytes.Replace(
+		manifest,
+		[]byte("imagePullPolicy: Always"),
+		[]byte("imagePullPolicy: Never"), 1)
 
-	r, err := n.RunCmd("microk8s kubectl apply -f - ", manifest)
+	r, err := n.RunCmd("microk8s kubectl apply -f - ", bytes.NewReader(manifest))
 	if err != nil {
 		t.Fatalf("failed to apply manifest: %s", r)
 	}
 
 	// when node.cloudprovider.kubernetes.io/uninitialized
 	// is gone, the ccm is running.
-	untilNodeUntainted(ctx, t, client)
-
-	return &testEnv{
-		project:         project,
-		mainNode:        n,
-		k8sClient:       client,
-		nodeProvisioner: np,
-	}
+	untilNodeUntainted(ctx, t, n.K8sclient)
 }
 
 func untilNodeUntainted(ctx context.Context, t testing.TB, client kubernetes.Interface) {

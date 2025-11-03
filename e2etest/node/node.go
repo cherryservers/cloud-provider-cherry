@@ -38,7 +38,6 @@ const (
 type Node struct {
 	Server         cherrygo.Server
 	K8sclient      kubernetes.Interface
-	kubeconfigPath string
 	cmdRunner      sshCmdRunner
 }
 
