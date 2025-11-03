@@ -106,7 +106,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 		t.Fatalf("failed to provision test node: %v", err)
 	}
 
-	err = n.LoadImage(ctx, "../dist/bin/ccm-test.tar")
+	err = n.LoadImage(ctx, *ccmImagePath)
 	if err != nil {
 		t.Fatalf("failed to load image to node")
 	}
