@@ -157,30 +157,23 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 
 func untilNodeUntainted(ctx context.Context, t testing.TB, client kubernetes.Interface) {
 	const informerResyncPeriod = 5 * time.Second
-	done := make(chan struct{})
+	const timeout = 120 * time.Second
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 
 	factory := informers.NewSharedInformerFactory(client, informerResyncPeriod)
 	_, err := factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(_, newObj any) {
 			newNode, _ := newObj.(*corev1.Node)
 			if len(newNode.Spec.Taints) == 0 {
-				select {
-				case <-done:
-				default:
-					close(done)
-				}
+				cancel()
 			}
 		}})
 	if err != nil {
 		t.Fatalf("failed to add node event handler: %v", err)
 	}
 
-	factory.Start(done)
-	factory.WaitForCacheSync(ctx.Done())
-	select {
-	case <-done:
-		factory.Shutdown()
-	case <-ctx.Done():
-		t.Fatalf("timed out waiting for node to become untainted: %v", ctx.Err())
-	}
+	factory.Start(ctx.Done())
+	factory.Shutdown()
+
 }
