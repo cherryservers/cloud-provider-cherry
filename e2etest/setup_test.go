@@ -2,20 +2,23 @@ package e2etest
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"os"
-	"os/signal"
+	"time"
+
 	"strconv"
-	"syscall"
 	"testing"
 
 	"github.com/cherryservers/cherrygo/v3"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/cherryservers/cloud-provider-cherry-tests/node"
 	ccm "github.com/cherryservers/cloud-provider-cherry/cherry"
-	"k8s.io/client-go/tools/clientcmd"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
 )
 
 const (
@@ -32,7 +35,7 @@ func setupProject(t testing.TB, name string) cherrygo.Project {
 		t.Fatalf("failed to setup cherry servers project: %v", err)
 	}
 	t.Cleanup(func() {
-		cherryClient.Projects.Delete(project.ID)
+		//cherryClient.Projects.Delete(project.ID)
 	})
 	return project
 }
@@ -72,32 +75,6 @@ func setupMicrok8sMetalLBNodeProvisioner(t testing.TB, testName string, projectI
 	return node.Microk8sMetalLBNodeProvisioner{Microk8sNodeProvisioner: p}
 }
 
-func setupKubeConfig(t testing.TB, n node.Node) string {
-	t.Helper()
-
-	cfg, cleanup, err := n.Kubeconfig()
-	if err != nil {
-		t.Fatalf("failed to generate kubeconfig: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanup()
-	})
-	return cfg
-}
-
-func setupCcmSecret(t testing.TB, ccmCfg ccm.Config) string {
-	t.Helper()
-
-	secret, cleanup, err := ccmSecret(ccmCfg)
-	if err != nil {
-		t.Fatalf("failed to setup ccm secret config")
-	}
-	t.Cleanup(func() {
-		cleanup()
-	})
-	return secret
-}
-
 type testEnv struct {
 	project         cherrygo.Project
 	mainNode        node.Node
@@ -131,39 +108,44 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 		t.Fatalf("failed to provision test node: %v", err)
 	}
 
-	// Get node kubeconfig:
-	kubeCfg := setupKubeConfig(t, n)
-
-	client, err := newK8sClient(kubeCfg)
+	err = n.LoadImage(ctx, "../dist/bin/ccm-test.tar")
 	if err != nil {
-		t.Fatalf("failed to create k8s client: %v", err)
+		t.Fatalf("failed to load image to node")
 	}
 
-	// Generate config secret for CCM:
-	secret := setupCcmSecret(t, ccm.Config{
+	client := n.K8sclient
+
+	configJSON, err := json.Marshal(ccm.Config{
 		AuthToken:           cherryClient.AuthToken,
 		Region:              node.Region,
 		LoadBalancerSetting: cfg.loadBalancer,
 		FIPTag:              cfg.fipTag,
 		ProjectID:           project.ID})
 
-	// Cancel child process on interrupt/termination.
-	// Should work on Windows as well, see https://pkg.go.dev/os/signal#hdr-Windows.
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-
-	// Launch CCM:
-	stopped, err := runCcm(ctx, kubeCfg, secret, client)
 	if err != nil {
-		t.Fatalf("failed to run CCM: %v", err)
+		t.Fatalf("failed to marshall ccm config: %v", err)
 	}
-	// Stop signal diversion when CCM is stopped.
-	go func() {
-		<-stopped
-		stop()
-	}()
-	t.Cleanup(func() {
-		<-stopped
-	})
+
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "cherry-cloud-config", Namespace: metav1.NamespaceSystem},
+		StringData: map[string]string{"cloud-sa.json": string(configJSON)},
+	}
+
+	client.CoreV1().Secrets(metav1.NamespaceSystem).Create(ctx, &secret, metav1.CreateOptions{})
+
+	manifest, err := os.ReadFile("./testdata/ccm-manifest.yaml")
+	if err != nil {
+		t.Fatalf("failed to read manifest: %v", err)
+	}
+
+	r, err := n.RunCmdWithInput("microk8s kubectl apply -f - ", manifest)
+	if err != nil {
+		t.Fatalf("failed to apply manifest: %s", r)
+	}
+
+	// when node.cloudprovider.kubernetes.io/uninitialized
+	// is gone, the ccm is running.
+	untilNodeUntainted(ctx, t, client)
 
 	return &testEnv{
 		project:         project,
@@ -173,14 +155,32 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	}
 }
 
-func newK8sClient(kubeconfig string) (*kubernetes.Clientset, error) {
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+func untilNodeUntainted(ctx context.Context, t testing.TB, client kubernetes.Interface) {
+	const informerResyncPeriod = 5 * time.Second
+	done := make(chan struct{})
+
+	factory := informers.NewSharedInformerFactory(client, informerResyncPeriod)
+	_, err := factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(_, newObj any) {
+			newNode, _ := newObj.(*corev1.Node)
+			if len(newNode.Spec.Taints) == 0 {
+				select {
+				case <-done:
+				default:
+					close(done)
+				}
+			}
+		}})
 	if err != nil {
-		return nil, fmt.Errorf("failed to build k8s config: %w", err)
+		t.Fatalf("failed to add node event handler: %v", err)
 	}
-	clientset, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build k8s clientset: %w", err)
+
+	factory.Start(done)
+	factory.WaitForCacheSync(ctx.Done())
+	select {
+	case <-done:
+		factory.Shutdown()
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for node to become untainted: %v", ctx.Err())
 	}
-	return clientset, nil
 }

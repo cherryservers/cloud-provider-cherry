@@ -35,10 +35,10 @@ const (
 )
 
 type Node struct {
-	Server    cherrygo.Server
-	K8sclient kubernetes.Interface
+	Server         cherrygo.Server
+	K8sclient      kubernetes.Interface
 	kubeconfigPath string
-	cmdRunner sshCmdRunner
+	cmdRunner      sshCmdRunner
 }
 
 // RunCmd runs a shell command on the node via SSH.
@@ -48,6 +48,14 @@ func (n Node) RunCmd(cmd string) (resp string, err error) {
 		return "", err
 	}
 	return n.cmdRunner.run(ip, cmd)
+}
+
+func (n Node) RunCmdWithInput(cmd string, data []byte) (resp string, err error) {
+	ip, err := serverPublicIP(n.Server)
+	if err != nil {
+		return "", err
+	}
+	return n.cmdRunner.runWithInPipe(ip, cmd, data)
 }
 
 // Join joins newNode to the base node's cluster.
@@ -80,7 +88,16 @@ func (n *Node) Join(ctx context.Context, nn Node) error {
 	}
 
 	nn.addCpLabel(ctx)
-	return n.untilReady(ctx)
+	kubeconfig, err := nn.RunCmd("microk8s config")
+	if err != nil {
+		return fmt.Errorf("failed to get k8s config: %w", err)
+	}
+
+	nn.K8sclient, err = newK8sClient(kubeconfig)
+	if err != nil {
+		return fmt.Errorf("failed to create k8s client: %w", err)
+	}
+	return nn.untilReady(ctx)
 }
 
 // JoinMany wraps join to join multiply nodes to the base node
@@ -110,42 +127,6 @@ func (n *Node) Remove(ctx context.Context, nn *Node) error {
 	return nil
 }
 
-// Kubeconfig generates a Kubeconfig file from the node
-// and returns a path to it.
-func (n *Node) Kubeconfig() (path string, cleanup func(), err error) {
-	if n.kubeconfigPath != "" {
-		return n.kubeconfigPath, func() {}, nil
-	}
-	const cmd = "microk8s config"
-
-	k, err := n.RunCmd(cmd)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to run '%s': %w", cmd, err)
-	}
-	f, err := os.CreateTemp("", "kubeconfig-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create temp file for kubeconfig: %w", err)
-	}
-	path = f.Name()
-	cleanup = fileCleanup(path)
-
-	_, err = f.WriteString(k)
-	if err != nil {
-		f.Close()
-		cleanup()
-		return "", nil, fmt.Errorf("failed to write kubeconfig contents: %w", err)
-	}
-
-	err = f.Close()
-	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to close kubeconfig file: %w", err)
-	}
-
-	n.kubeconfigPath = path
-	return path, cleanup, nil
-}
-
 // addCpLabel adds the well-known control plane label
 // to the node, since microk8s doesn't use it,
 // but we need it for fip reconciliation.
@@ -164,7 +145,7 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 }
 
 // untilReady watches the node until an event with ready status.
-func(n *Node) untilReady(ctx context.Context) error {
+func (n *Node) untilReady(ctx context.Context) error {
 	lw := cache.NewListWatchFromClient(n.K8sclient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
 
 	_, err := watch.UntilWithSync(ctx, lw, &corev1.Node{}, nil, func(event apiwatch.Event) (done bool, err error) {
@@ -186,6 +167,24 @@ func(n *Node) untilReady(ctx context.Context) error {
 		return fmt.Errorf("failed to reach joined node state: %w", err)
 	}
 
+	return nil
+}
+
+// LoadImage side-loads a OCI image tarball onto the node.
+func (n *Node) LoadImage(ctx context.Context, ociPath string) error {
+	oci, err := os.ReadFile(ociPath)
+	if err != nil {
+		return fmt.Errorf("failed to read oci tar file: %w", err)
+	}
+
+	addr, err := serverPublicIP(n.Server)
+	if err != nil {
+		return fmt.Errorf("server %q has no public ip", n.Server.Hostname)
+	}
+	r, err := n.cmdRunner.runWithInPipe(addr, "microk8s ctr image import - ", oci)
+	if err != nil {
+		return fmt.Errorf("failed to load image: %w, with stderr: %s", err, r)
+	}
 	return nil
 }
 
@@ -341,4 +340,3 @@ func fileCleanup(path string) func() {
 		once.Do(func() { os.Remove(path) })
 	}
 }
-

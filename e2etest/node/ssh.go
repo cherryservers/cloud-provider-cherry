@@ -13,9 +13,7 @@ type sshCmdRunner struct {
 	Signer ssh.Signer
 }
 
-// run a command via SSH at the given address using bash.
-// On a non-zero exit code, the response string contains stderr.
-func (s sshCmdRunner) run(addr, cmd string) (string, error) {
+func (s sshCmdRunner) dial(addr string) (*ssh.Client, error) {
 	const port = "22"
 
 	cfg := ssh.ClientConfig{
@@ -25,8 +23,16 @@ func (s sshCmdRunner) run(addr, cmd string) (string, error) {
 	}
 	client, err := ssh.Dial("tcp", addr+":"+port, &cfg)
 	if err != nil {
-		return "", fmt.Errorf("failed ssh dial: %w", err)
+		return nil, fmt.Errorf("failed ssh dial: %w", err)
 	}
+	return client, nil
+}
+
+// Run a command via SSH at the given address using bash.
+// On a non-zero exit code, the response string contains stderr.
+func (s sshCmdRunner) run(addr, cmd string) (string, error) {
+	client, err := s.dial(addr)
+	if err != nil {return "", err} 
 	defer client.Close()
 
 	session, err := client.NewSession()
@@ -44,6 +50,32 @@ func (s sshCmdRunner) run(addr, cmd string) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+// Run a command via SSH at the given address using bash
+// and pipe the data to stdin.
+// On a non-zero exit code, the response string contains stderr.
+func (s sshCmdRunner) runWithInPipe(addr, cmd string, data []byte) (string, error) {
+	client, err := s.dial(addr)
+	if err != nil {return "", err} 
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("failed to establish session: %w", err)
+	}
+	defer session.Close()
+
+	var stdout, stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+	session.Stdin = bytes.NewReader(data)
+
+	if err := session.Run("bash -lc " + strconv.Quote(cmd)); err != nil {
+		return stderr.String(), fmt.Errorf("failed to run cmd: %w", err)
+	}
+
+	return stdout.String(), nil
 }
 
 func NewSshCmdRunner() (*sshCmdRunner, error) {

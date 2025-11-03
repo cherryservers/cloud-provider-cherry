@@ -72,7 +72,7 @@ func TestNodeAddDelete(t *testing.T) {
 	}
 
 	// check metadata
-	if got, want := k8sn.Labels["topology.kubernetes.io/region"], n.Server.Region.Name; got != want {
+	if got, want := k8sn.Labels["topology.kubernetes.io/region"], n.Server.Region.Slug; got != want {
 		t.Errorf("got region %q, want %q", got, want)
 	}
 
