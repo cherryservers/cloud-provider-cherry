@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"fmt"
+	"io"
 	"strconv"
 
 	"golang.org/x/crypto/ssh"
@@ -30,34 +31,12 @@ func (s sshCmdRunner) dial(addr string) (*ssh.Client, error) {
 
 // Run a command via SSH at the given address using bash.
 // On a non-zero exit code, the response string contains stderr.
-func (s sshCmdRunner) run(addr, cmd string) (string, error) {
+// Passing nil stdin is fine.
+func (s sshCmdRunner) run(addr, cmd string, stdin io.Reader) (string, error) {
 	client, err := s.dial(addr)
-	if err != nil {return "", err} 
-	defer client.Close()
-
-	session, err := client.NewSession()
 	if err != nil {
-		return "", fmt.Errorf("failed to establish session: %w", err)
+		return "", err
 	}
-	defer session.Close()
-
-	var b bytes.Buffer
-	var eb bytes.Buffer
-	session.Stdout = &b
-	session.Stderr = &eb
-	if err := session.Run("bash -lc " + strconv.Quote(cmd)); err != nil {
-		return eb.String(), fmt.Errorf("failed to run cmd: %w", err)
-	}
-
-	return b.String(), nil
-}
-
-// Run a command via SSH at the given address using bash
-// and pipe the data to stdin.
-// On a non-zero exit code, the response string contains stderr.
-func (s sshCmdRunner) runWithInPipe(addr, cmd string, data []byte) (string, error) {
-	client, err := s.dial(addr)
-	if err != nil {return "", err} 
 	defer client.Close()
 
 	session, err := client.NewSession()
@@ -69,7 +48,7 @@ func (s sshCmdRunner) runWithInPipe(addr, cmd string, data []byte) (string, erro
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
 	session.Stderr = &stderr
-	session.Stdin = bytes.NewReader(data)
+	session.Stdin = stdin
 
 	if err := session.Run("bash -lc " + strconv.Quote(cmd)); err != nil {
 		return stderr.String(), fmt.Errorf("failed to run cmd: %w", err)

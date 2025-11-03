@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -42,20 +43,13 @@ type Node struct {
 }
 
 // RunCmd runs a shell command on the node via SSH.
-func (n Node) RunCmd(cmd string) (resp string, err error) {
+// Passing nil stdin is fine.
+func (n Node) RunCmd(cmd string, stdin io.Reader) (resp string, err error) {
 	ip, err := serverPublicIP(n.Server)
 	if err != nil {
 		return "", err
 	}
-	return n.cmdRunner.run(ip, cmd)
-}
-
-func (n Node) RunCmdWithInput(cmd string, data []byte) (resp string, err error) {
-	ip, err := serverPublicIP(n.Server)
-	if err != nil {
-		return "", err
-	}
-	return n.cmdRunner.runWithInPipe(ip, cmd, data)
+	return n.cmdRunner.run(ip, cmd, stdin)
 }
 
 // Join joins newNode to the base node's cluster.
@@ -64,7 +58,7 @@ func (n *Node) Join(ctx context.Context, nn Node) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, joinTimeout, errors.New("node join timeout"))
 	defer cancel()
 
-	r, err := n.RunCmd("microk8s add-node")
+	r, err := n.RunCmd("microk8s add-node", nil)
 	if err != nil {
 		return fmt.Errorf("couldn't get join URL from control plane node: %w", err)
 	}
@@ -82,13 +76,13 @@ func (n *Node) Join(ctx context.Context, nn Node) error {
 		}
 	}
 
-	_, err = nn.RunCmd(joinCmd)
+	_, err = nn.RunCmd(joinCmd, nil)
 	if err != nil {
 		return fmt.Errorf("couldn't execute join cmd: %w", err)
 	}
 
 	nn.addCpLabel(ctx)
-	kubeconfig, err := nn.RunCmd("microk8s config")
+	kubeconfig, err := nn.RunCmd("microk8s config", nil)
 	if err != nil {
 		return fmt.Errorf("failed to get k8s config: %w", err)
 	}
@@ -120,7 +114,7 @@ func (n *Node) JoinMany(ctx context.Context, nodes []Node) []error {
 
 // Remove removes the provided node from the base node.
 func (n *Node) Remove(ctx context.Context, nn *Node) error {
-	resp, err := n.RunCmd("microk8s remove-node " + nn.Server.Hostname + " --force")
+	resp, err := n.RunCmd("microk8s remove-node " + nn.Server.Hostname + " --force", nil)
 	if err != nil {
 		return fmt.Errorf("failed to remove node: %v: %s", err, resp)
 	}
@@ -136,7 +130,7 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 
 	return backoff.ExpBackoffWithContext(func() (bool, error) {
 		_, err := n.RunCmd("microk8s kubectl label nodes " + n.Server.Hostname +
-			" " + controlPlaneNodeLabel + "=\"\"")
+			" " + controlPlaneNodeLabel + "=\"\"", nil)
 		if err != nil {
 			return false, nil
 		}
@@ -172,16 +166,17 @@ func (n *Node) untilReady(ctx context.Context) error {
 
 // LoadImage side-loads a OCI image tarball onto the node.
 func (n *Node) LoadImage(ctx context.Context, ociPath string) error {
-	oci, err := os.ReadFile(ociPath)
+	oci, err := os.Open(ociPath)
 	if err != nil {
-		return fmt.Errorf("failed to read oci tar file: %w", err)
+		return fmt.Errorf("failed to open oci tar file: %w", err)
 	}
+	defer oci.Close()
 
 	addr, err := serverPublicIP(n.Server)
 	if err != nil {
 		return fmt.Errorf("server %q has no public ip", n.Server.Hostname)
 	}
-	r, err := n.cmdRunner.runWithInPipe(addr, "microk8s ctr image import - ", oci)
+	r, err := n.cmdRunner.run(addr, "microk8s ctr image import - ", oci)
 	if err != nil {
 		return fmt.Errorf("failed to load image: %w, with stderr: %s", err, r)
 	}
@@ -231,14 +226,14 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 
 	backoff.ExpBackoffWithContext(func() (bool, error) {
 		// Check if kube-api is reachable. Non-zero exit code will be returned if not.
-		_, err = np.CmdRunner.run(ip, "microk8s kubectl get nodes --no-headers")
+		_, err = np.CmdRunner.run(ip, "microk8s kubectl get nodes --no-headers", nil)
 		if err != nil {
 			return false, nil
 		}
 		return true, nil
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 
-	kubeconfig, err := np.CmdRunner.run(ip, "microk8s config")
+	kubeconfig, err := np.CmdRunner.run(ip, "microk8s config", nil)
 	if err != nil {
 		return Node{}, fmt.Errorf("failed to get k8s config: %w", err)
 	}

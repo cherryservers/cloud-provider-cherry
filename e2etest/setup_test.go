@@ -133,12 +133,13 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 
 	client.CoreV1().Secrets(metav1.NamespaceSystem).Create(ctx, &secret, metav1.CreateOptions{})
 
-	manifest, err := os.ReadFile("./testdata/ccm-manifest.yaml")
+	manifest, err := os.Open("./testdata/ccm-manifest.yaml")
 	if err != nil {
-		t.Fatalf("failed to read manifest: %v", err)
+		t.Fatalf("failed to open manifest file: %v", err)
 	}
+	defer manifest.Close()
 
-	r, err := n.RunCmdWithInput("microk8s kubectl apply -f - ", manifest)
+	r, err := n.RunCmd("microk8s kubectl apply -f - ", manifest)
 	if err != nil {
 		t.Fatalf("failed to apply manifest: %s", r)
 	}
