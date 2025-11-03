@@ -8,20 +8,16 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cherryservers/cherrygo/v3"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/cherryservers/cloud-provider-cherry-tests/backoff"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	apiwatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/watch"
 )
 
 const (
@@ -36,9 +32,9 @@ const (
 )
 
 type Node struct {
-	Server         cherrygo.Server
-	K8sclient      kubernetes.Interface
-	cmdRunner      sshCmdRunner
+	Server    cherrygo.Server
+	K8sclient kubernetes.Interface
+	cmdRunner sshCmdRunner
 }
 
 // RunCmd runs a shell command on the node via SSH.
@@ -90,7 +86,7 @@ func (n *Node) Join(ctx context.Context, nn Node) error {
 	if err != nil {
 		return fmt.Errorf("failed to create k8s client: %w", err)
 	}
-	return nn.untilReady(ctx)
+	return nn.UntilNodeUntainted(ctx)
 }
 
 // JoinMany wraps join to join multiply nodes to the base node
@@ -113,7 +109,7 @@ func (n *Node) JoinMany(ctx context.Context, nodes []Node) []error {
 
 // Remove removes the provided node from the base node.
 func (n *Node) Remove(ctx context.Context, nn *Node) error {
-	resp, err := n.RunCmd("microk8s remove-node " + nn.Server.Hostname + " --force", nil)
+	resp, err := n.RunCmd("microk8s remove-node "+nn.Server.Hostname+" --force", nil)
 	if err != nil {
 		return fmt.Errorf("failed to remove node: %v: %s", err, resp)
 	}
@@ -128,8 +124,8 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 	defer cancel()
 
 	return backoff.ExpBackoffWithContext(func() (bool, error) {
-		_, err := n.RunCmd("microk8s kubectl label nodes " + n.Server.Hostname +
-			" " + controlPlaneNodeLabel + "=\"\"", nil)
+		_, err := n.RunCmd("microk8s kubectl label nodes "+n.Server.Hostname+
+			" "+controlPlaneNodeLabel+"=\"\"", nil)
 		if err != nil {
 			return false, nil
 		}
@@ -137,29 +133,31 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 }
 
-// untilReady watches the node until an event with ready status.
-func (n *Node) untilReady(ctx context.Context) error {
-	lw := cache.NewListWatchFromClient(n.K8sclient.CoreV1().RESTClient(), "nodes", metav1.NamespaceAll, fields.Everything())
+// 
+func (n *Node) UntilNodeUntainted(ctx context.Context) error {
+	const (
+		informerResyncPeriod = 5 * time.Second
+		timeout              = 120 * time.Second
+	)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 
-	_, err := watch.UntilWithSync(ctx, lw, &corev1.Node{}, nil, func(event apiwatch.Event) (done bool, err error) {
-		node, ok := event.Object.(*corev1.Node)
-		if !ok {
-			return false, fmt.Errorf("unexpected object type: %T", event.Object)
-		}
-		if node.ObjectMeta.Name != n.Server.Hostname {
-			return false, nil
-		}
-		for _, c := range node.Status.Conditions {
-			if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
-				return true, nil
+	factory := informers.NewSharedInformerFactory(n.K8sclient, informerResyncPeriod)
+	_, err := factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(_, newObj any) {
+			newNode, _ := newObj.(*corev1.Node)
+			if newNode.Name != n.Server.Hostname {
+				return
 			}
-		}
-		return false, nil
-	})
+			if len(newNode.Spec.Taints) == 0 {
+				cancel()
+			}
+		}})
 	if err != nil {
-		return fmt.Errorf("failed to reach joined node state: %w", err)
+		return err
 	}
 
+	factory.Start(ctx.Done())
+	factory.Shutdown()
 	return nil
 }
 
@@ -326,11 +324,4 @@ func provisionServer(ctx context.Context, cc cherrygo.Client, projectID int, use
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 
 	return srv, nil
-}
-
-func fileCleanup(path string) func() {
-	var once sync.Once
-	return func() {
-		once.Do(func() { os.Remove(path) })
-	}
 }

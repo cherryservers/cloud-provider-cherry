@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"time"
 
 	"strconv"
 	"testing"
@@ -13,13 +12,11 @@ import (
 	"github.com/cherryservers/cherrygo/v3"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/cherryservers/cloud-provider-cherry-tests/node"
 	ccm "github.com/cherryservers/cloud-provider-cherry/cherry"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/informers"
 )
 
 const (
@@ -161,28 +158,5 @@ func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
 
 	// when node.cloudprovider.kubernetes.io/uninitialized
 	// is gone, the ccm is running.
-	untilNodeUntainted(ctx, t, n.K8sclient)
-}
-
-func untilNodeUntainted(ctx context.Context, t testing.TB, client kubernetes.Interface) {
-	const informerResyncPeriod = 5 * time.Second
-	const timeout = 120 * time.Second
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-
-	factory := informers.NewSharedInformerFactory(client, informerResyncPeriod)
-	_, err := factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(_, newObj any) {
-			newNode, _ := newObj.(*corev1.Node)
-			if len(newNode.Spec.Taints) == 0 {
-				cancel()
-			}
-		}})
-	if err != nil {
-		t.Fatalf("failed to add node event handler: %v", err)
-	}
-
-	factory.Start(ctx.Done())
-	factory.Shutdown()
-
+	n.UntilNodeUntainted(ctx)
 }
