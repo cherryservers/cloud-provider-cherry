@@ -68,15 +68,10 @@ func setupMicrok8sNodeProvisioner(t testing.TB, testName string, projectID int) 
 	}
 }
 
-func setupMicrok8sMetalLBNodeProvisioner(t testing.TB, testName string, projectID int) node.Microk8sMetalLBNodeProvisioner {
-	p := setupMicrok8sNodeProvisioner(t, testName, projectID)
-	return node.Microk8sMetalLBNodeProvisioner{Microk8sNodeProvisioner: p}
-}
-
 type testEnv struct {
 	project         cherrygo.Project
 	mainNode        node.Node
-	nodeProvisioner node.NodeProvisioner
+	nodeProvisioner node.Microk8sNodeProvisioner
 	k8sClient       kubernetes.Interface
 }
 
@@ -86,6 +81,14 @@ type testEnvConfig struct {
 	fipTag       string // optional
 }
 
+type nodeProvisioner interface {
+	Provision(context.Context) (node.Node, error)
+}
+
+type batchNodeProvisioner interface {
+	ProvisionBatch(context.Context, int) ([]node.Node, []error)
+}
+
 func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv {
 	t.Helper()
 
@@ -93,12 +96,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	project := setupProject(t, cfg.name)
 
 	// Setup node provisioner:
-	var np node.NodeProvisioner
-	if cfg.loadBalancer != metallbSetting {
-		np = setupMicrok8sNodeProvisioner(t, cfg.name, project.ID)
-	} else {
-		np = setupMicrok8sMetalLBNodeProvisioner(t, cfg.name, project.ID)
-	}
+	np := setupMicrok8sNodeProvisioner(t, cfg.name, project.ID)
 
 	// Create a node (server with k8s running):
 	n, err := np.Provision(t.Context())
@@ -128,7 +126,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 
 func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
 	const (
-		imgTag = "ghcr.io/cherryservers/cloud-provider-cherry:test"
+		imgTag       = "ghcr.io/cherryservers/cloud-provider-cherry:test"
 		manifestPath = "../deploy/template/deployment.yaml"
 	)
 

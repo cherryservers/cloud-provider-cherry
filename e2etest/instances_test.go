@@ -49,8 +49,9 @@ func TestNodeAddDelete(t *testing.T) {
 	cfg := testEnvConfig{name: "kubernetes-ccm-test-node-add-delete"}
 
 	env := setupTestEnv(ctx, t, cfg)
+	var np nodeProvisioner = env.nodeProvisioner
 
-	n, err := env.nodeProvisioner.Provision(ctx)
+	n, err := np.Provision(ctx)
 	if err != nil {
 		t.Fatalf("failed to provision node: %v", err)
 	}

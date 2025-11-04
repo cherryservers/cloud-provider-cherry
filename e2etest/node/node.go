@@ -174,15 +174,6 @@ func (n *Node) LoadImage(ctx context.Context, ociPath string) error {
 	return nil
 }
 
-type NodeProvisioner interface {
-	Provision(ctx context.Context) (Node, error)
-}
-
-type ManyNodeProvisioner interface {
-	NodeProvisioner
-	ProvisionMany(ctx context.Context, n int) ([]Node, []error)
-}
-
 type Microk8sNodeProvisioner struct {
 	CherryClient cherrygo.Client
 	ProjectID    int
@@ -194,6 +185,39 @@ type Microk8sNodeProvisioner struct {
 func (np Microk8sNodeProvisioner) Provision(ctx context.Context) (Node, error) {
 	const userDataPath = "./testdata/init-microk8s.yaml"
 	return np.provision(ctx, userDataPath)
+}
+
+// ProvisionWithMetalLB creates a Cherry Servers server and waits for k8s and metallb to be running.
+func (np Microk8sNodeProvisioner) ProvisionWithMetalLB(ctx context.Context) (Node, error) {
+	const userDataPathWithMetalLB = "./testdata/init-microk8s-with-metallb.yaml"
+	return np.provision(ctx, userDataPathWithMetalLB)
+}
+
+// ProvisionBatch wraps provision to create n Cherry Servers servers
+// in a concurrent manner.
+func (np Microk8sNodeProvisioner) ProvisionBatch(ctx context.Context, n int) ([]Node, []error) {
+	type p struct {
+		nn  Node
+		err error
+	}
+
+	nodes := make([]Node, n)
+	errs := make([]error, n)
+	c := make(chan p, n)
+
+	for range n {
+		go func() {
+			nn, err := np.Provision(ctx)
+			c <- p{nn: nn, err: err}
+		}()
+	}
+	for i := range n {
+		provisioned := <-c
+		nodes[i] = provisioned.nn
+		errs[i] = provisioned.err
+
+	}
+	return nodes, errs
 }
 
 func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath string) (Node, error) {
@@ -240,43 +264,6 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 	n := Node{Server: srv, cmdRunner: np.CmdRunner, K8sclient: k8sclient}
 	n.addCpLabel(ctx)
 	return n, nil
-}
-
-// ProvisionMany wraps provision to create n Cherry Servers servers
-// in a concurrent manner.
-func (np Microk8sNodeProvisioner) ProvisionMany(ctx context.Context, n int) ([]Node, []error) {
-	type p struct {
-		nn  Node
-		err error
-	}
-
-	nodes := make([]Node, n)
-	errs := make([]error, n)
-	c := make(chan p, n)
-
-	for range n {
-		go func() {
-			nn, err := np.Provision(ctx)
-			c <- p{nn: nn, err: err}
-		}()
-	}
-	for i := range n {
-		provisioned := <-c
-		nodes[i] = provisioned.nn
-		errs[i] = provisioned.err
-
-	}
-	return nodes, errs
-}
-
-type Microk8sMetalLBNodeProvisioner struct {
-	Microk8sNodeProvisioner
-}
-
-// Provision creates a Cherry Servers server and waits for k8s and metallb to be running.
-func (np Microk8sMetalLBNodeProvisioner) Provision(ctx context.Context) (Node, error) {
-	const userDataPathWithMetalLB = "./testdata/init-microk8s-with-metallb.yaml"
-	return np.provision(ctx, userDataPathWithMetalLB)
 }
 
 func serverPublicIP(srv cherrygo.Server) (string, error) {
