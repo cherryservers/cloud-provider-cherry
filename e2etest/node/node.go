@@ -82,9 +82,9 @@ func (n *Node) Join(ctx context.Context, nn Node) error {
 	return nn.UntilNodeUntainted(ctx)
 }
 
-// JoinMany wraps join to join multiply nodes to the base node
+// JoinBatch wraps join to join multiply nodes to the base node
 // in a concurrent manner.
-func (n *Node) JoinMany(ctx context.Context, nodes []Node) []error {
+func (n *Node) JoinBatch(ctx context.Context, nodes []Node) []error {
 	errs := make([]error, len(nodes))
 	c := make(chan error, len(nodes))
 
