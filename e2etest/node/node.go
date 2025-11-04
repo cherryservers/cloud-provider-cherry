@@ -20,7 +20,10 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-const Region = "LT-Siauliai"
+const (
+	Region                = "LT-Siauliai"
+	ControlPlaneNodeLabel = "node-role.kubernetes.io/control-plane"
+)
 
 type Node struct {
 	Server    cherrygo.Server
@@ -113,14 +116,12 @@ func (n *Node) Remove(ctx context.Context, nn *Node) error {
 // to the node, since microk8s doesn't use it,
 // but we need it for fip reconciliation.
 func (n *Node) addCpLabel(ctx context.Context) error {
-	const controlPlaneNodeLabel = "node-role.kubernetes.io/control-plane"
-
 	ctx, cancel := context.WithTimeoutCause(ctx, 64*time.Second, fmt.Errorf("timed out on label apply for %s", n.Server.Hostname))
 	defer cancel()
 
 	return backoff.ExpBackoffWithContext(func() (bool, error) {
 		_, err := n.RunCmd("microk8s kubectl label nodes "+n.Server.Hostname+
-			" "+controlPlaneNodeLabel+"=\"\"", nil)
+			" "+ControlPlaneNodeLabel+"=\"\"", nil)
 		if err != nil {
 			return false, nil
 		}

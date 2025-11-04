@@ -99,7 +99,13 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	np := setupMicrok8sNodeProvisioner(t, cfg.name, project.ID)
 
 	// Create a node (server with k8s running):
-	n, err := np.Provision(t.Context())
+	var err error
+	var n node.Node
+	if cfg.loadBalancer != metallbSetting {
+		n, err = np.Provision(t.Context())
+	} else {
+		n, err = np.ProvisionWithMetalLB(t.Context())
+	}
 	if err != nil {
 		t.Fatalf("failed to provision test node: %v", err)
 	}
