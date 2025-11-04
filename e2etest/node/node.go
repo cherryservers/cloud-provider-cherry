@@ -20,16 +20,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-const (
-	joinTimeout             = 210 * time.Second
-	provisionTimeout        = 513 * time.Second
-	controlPlaneNodeLabel   = "node-role.kubernetes.io/control-plane"
-	userDataPath            = "./testdata/init-microk8s.yaml"
-	userDataPathWithMetalLB = "./testdata/init-microk8s-with-metallb.yaml"
-	serverImage             = "ubuntu_24_04_64bit"
-	ServerPlan              = "B1-4-4gb-80s-shared"
-	Region                  = "LT-Siauliai"
-)
+const Region = "LT-Siauliai"
 
 type Node struct {
 	Server    cherrygo.Server
@@ -50,7 +41,9 @@ func (n Node) RunCmd(cmd string, stdin io.Reader) (resp string, err error) {
 // Join joins newNode to the base node's cluster.
 // Blocks until the node is ready.
 func (n *Node) Join(ctx context.Context, nn Node) error {
-	ctx, cancel := context.WithTimeoutCause(ctx, joinTimeout, errors.New("node join timeout"))
+	const timeout = 210 * time.Second
+
+	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errors.New("node join timeout"))
 	defer cancel()
 
 	r, err := n.RunCmd("microk8s add-node", nil)
@@ -120,6 +113,8 @@ func (n *Node) Remove(ctx context.Context, nn *Node) error {
 // to the node, since microk8s doesn't use it,
 // but we need it for fip reconciliation.
 func (n *Node) addCpLabel(ctx context.Context) error {
+	const controlPlaneNodeLabel = "node-role.kubernetes.io/control-plane"
+
 	ctx, cancel := context.WithTimeoutCause(ctx, 64*time.Second, fmt.Errorf("timed out on label apply for %s", n.Server.Hostname))
 	defer cancel()
 
@@ -133,7 +128,6 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 }
 
-// 
 func (n *Node) UntilNodeUntainted(ctx context.Context) error {
 	const (
 		informerResyncPeriod = 5 * time.Second
@@ -198,11 +192,14 @@ type Microk8sNodeProvisioner struct {
 
 // Provision creates a Cherry Servers server and waits for k8s to be running.
 func (np Microk8sNodeProvisioner) Provision(ctx context.Context) (Node, error) {
+	const userDataPath = "./testdata/init-microk8s.yaml"
 	return np.provision(ctx, userDataPath)
 }
 
 func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath string) (Node, error) {
-	ctx, cancel := context.WithTimeoutCause(ctx, provisionTimeout, errors.New("node provision timeout"))
+	const timeout = 513 * time.Second
+
+	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errors.New("node provision timeout"))
 	defer cancel()
 
 	userDataRaw, err := os.ReadFile(userDataPath)
@@ -278,6 +275,7 @@ type Microk8sMetalLBNodeProvisioner struct {
 
 // Provision creates a Cherry Servers server and waits for k8s and metallb to be running.
 func (np Microk8sMetalLBNodeProvisioner) Provision(ctx context.Context) (Node, error) {
+	const userDataPathWithMetalLB = "./testdata/init-microk8s-with-metallb.yaml"
 	return np.provision(ctx, userDataPathWithMetalLB)
 }
 
@@ -299,9 +297,14 @@ func newK8sClient(kubeconfig string) (*kubernetes.Clientset, error) {
 }
 
 func provisionServer(ctx context.Context, cc cherrygo.Client, projectID int, userdata, sshkeyID string) (cherrygo.Server, error) {
+	const (
+		serverImage = "ubuntu_24_04_64bit"
+		serverPlan  = "B1-4-4gb-80s-shared"
+	)
+
 	srv, _, err := cc.Servers.Create(&cherrygo.CreateServer{
 		ProjectID: projectID,
-		Plan:      ServerPlan,
+		Plan:      serverPlan,
 		Region:    Region,
 		Image:     serverImage,
 		UserData:  userdata,

@@ -127,7 +127,10 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 }
 
 func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
-	const imgTag = "ghcr.io/cherryservers/cloud-provider-cherry:test"
+	const (
+		imgTag = "ghcr.io/cherryservers/cloud-provider-cherry:test"
+		manifestPath = "../deploy/template/deployment.yaml"
+	)
 
 	configJSON, err := json.Marshal(cfg)
 	if err != nil {
@@ -141,7 +144,7 @@ func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
 
 	n.K8sclient.CoreV1().Secrets(metav1.NamespaceSystem).Create(ctx, &secret, metav1.CreateOptions{})
 
-	manifest, err := os.ReadFile("../deploy/template/deployment.yaml")
+	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("failed to read deployment manifest file: %v", err)
 	}
