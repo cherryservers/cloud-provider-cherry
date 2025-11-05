@@ -165,5 +165,5 @@ func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
 
 	// when node.cloudprovider.kubernetes.io/uninitialized
 	// is gone, the ccm is running.
-	n.UntilNodeUntainted(ctx)
+	n.UntilHasProviderID(ctx)
 }

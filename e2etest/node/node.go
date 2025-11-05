@@ -43,6 +43,8 @@ func (n Node) RunCmd(cmd string, stdin io.Reader) (resp string, err error) {
 
 // Join joins newNode to the base node's cluster.
 // Blocks until the node is ready.
+// The base node MUST be a control plane node.
+// The base node's cluster MUST have the CCM running.
 func (n *Node) Join(ctx context.Context, nn Node) error {
 	const timeout = 210 * time.Second
 
@@ -82,7 +84,7 @@ func (n *Node) Join(ctx context.Context, nn Node) error {
 	if err != nil {
 		return fmt.Errorf("failed to create k8s client: %w", err)
 	}
-	return nn.UntilNodeUntainted(ctx)
+	return nn.UntilHasProviderID(ctx)
 }
 
 // JoinBatch wraps join to join multiply nodes to the base node
@@ -129,7 +131,7 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 }
 
-func (n *Node) UntilNodeUntainted(ctx context.Context) error {
+func (n *Node) UntilHasProviderID(ctx context.Context) error {
 	const (
 		informerResyncPeriod = 5 * time.Second
 		timeout              = 120 * time.Second
@@ -143,7 +145,7 @@ func (n *Node) UntilNodeUntainted(ctx context.Context) error {
 			if newNode.Name != n.Server.Hostname {
 				return
 			}
-			if len(newNode.Spec.Taints) == 0 {
+			if newNode.Spec.ProviderID != "" {
 				cancel()
 			}
 		}})
@@ -254,12 +256,12 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 
 	kubeconfig, err := np.CmdRunner.run(ip, "microk8s config", nil)
 	if err != nil {
-		return Node{}, fmt.Errorf("failed to get k8s config: %w", err)
+		return Node{}, fmt.Errorf("failed to get k8s config for node %q: %w", srv.Hostname, err)
 	}
 
 	k8sclient, err := newK8sClient(kubeconfig)
 	if err != nil {
-		return Node{}, fmt.Errorf("failed to create k8s client: %w", err)
+		return Node{}, fmt.Errorf("failed to create k8s client for node %q: %w", srv.Hostname, err)
 	}
 
 	n := Node{Server: srv, cmdRunner: np.CmdRunner, K8sclient: k8sclient}
