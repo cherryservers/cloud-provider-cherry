@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 const (
 	Region                = "LT-Siauliai"
 	ControlPlaneNodeLabel = "node-role.kubernetes.io/control-plane"
+	informerResyncPeriod  = 5 * time.Second
+	informerTimeout       = 120 * time.Second
 )
 
 type Node struct {
@@ -132,11 +135,7 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 }
 
 func (n *Node) UntilHasProviderID(ctx context.Context) error {
-	const (
-		informerResyncPeriod = 5 * time.Second
-		timeout              = 120 * time.Second
-	)
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, informerTimeout)
 
 	factory := informers.NewSharedInformerFactory(n.K8sclient, informerResyncPeriod)
 	_, err := factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -266,7 +265,41 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 
 	n := Node{Server: srv, cmdRunner: np.CmdRunner, K8sclient: k8sclient}
 	n.addCpLabel(ctx)
+	err = np.untilProvisioned(ctx, n)
+	if err != nil {
+		return Node{}, fmt.Errorf("node didn't reach provisioned state: %w", err)
+	}
 	return n, nil
+}
+
+// wait until node has provider ID or is tainted with
+// 'node.cloudprovider.kubernetes.io/uninitialized'
+func (np Microk8sNodeProvisioner) untilProvisioned(ctx context.Context, n Node) error {
+	const uninitTaint = "node.cloudprovider.kubernetes.io/uninitialized"
+	ctx, cancel := context.WithTimeout(ctx, informerTimeout)
+
+	factory := informers.NewSharedInformerFactory(n.K8sclient, informerResyncPeriod)
+	_, err := factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(_, newObj any) {
+			newNode, _ := newObj.(*corev1.Node)
+			if newNode.Name != n.Server.Hostname {
+				return
+			}
+			if newNode.Spec.ProviderID != "" {
+				cancel()
+			} else if slices.ContainsFunc(newNode.Spec.Taints, func(t corev1.Taint) bool {
+				return t.Key == uninitTaint
+			}) {
+				cancel()
+			}
+		}})
+	if err != nil {
+		return err
+	}
+
+	factory.Start(ctx.Done())
+	factory.Shutdown()
+	return nil
 }
 
 func serverPublicIP(srv cherrygo.Server) (string, error) {
