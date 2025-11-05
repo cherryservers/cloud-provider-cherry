@@ -459,7 +459,7 @@ func (s loadBalancerSubTester) testServerBgpEnabled(ctx context.Context, t *test
 		}
 
 		if got, want := srv.BGP.Enabled, true; got != want {
-			t.Errorf("server %q bgp=%t, want=%t", srv.Name, got, want)
+			t.Errorf("server %q bgp=%t, want=%t", srv.Hostname, got, want)
 		}
 	})
 }
