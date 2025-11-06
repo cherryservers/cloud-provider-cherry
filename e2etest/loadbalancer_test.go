@@ -453,7 +453,7 @@ func (s loadBalancerSubTester) testFipTags(ctx context.Context, t *testing.T) {
 	})
 }
 
-func (s loadBalancerSubTester) testServerBgpEnabled(ctx context.Context, t *testing.T) {
+func (s loadBalancerSubTester) testServerBgpEnabled(t *testing.T) {
 	t.Run("server bgp enabled", func(t *testing.T) {
 		srv, _, err := cherryClient.Servers.Get(s.env.mainNode.Server.ID, nil)
 		if err != nil {
@@ -466,7 +466,7 @@ func (s loadBalancerSubTester) testServerBgpEnabled(ctx context.Context, t *test
 	})
 }
 
-func (s loadBalancerSubTester) testProjectBgpEnabled(ctx context.Context, t *testing.T) {
+func (s loadBalancerSubTester) testProjectBgpEnabled(t *testing.T) {
 	t.Run("project bgp enabled", func(t *testing.T) {
 		project, _, err := cherryClient.Projects.Get(s.env.project.ID, nil)
 		if err != nil {
@@ -496,7 +496,7 @@ func (s loadBalancerSubTester) testNodeHasAnnotations(ctx context.Context, t *te
 			t.Fatalf("failed to get project: %v", err)
 		}
 
-		for i, peerIp := range srv.Region.BGP.Hosts {
+		for i, peerIP := range srv.Region.BGP.Hosts {
 			peerAsnKey := strings.Replace(ccm.DefaultAnnotationPeerASN, "{{n}}", strconv.Itoa(i), 1)
 			if got, want := node.Annotations[peerAsnKey], strconv.Itoa(srv.Region.BGP.Asn); got != want {
 				t.Errorf("peerAsn=%s, want=%s, key=%s", got, want, peerAsnKey)
@@ -507,9 +507,9 @@ func (s loadBalancerSubTester) testNodeHasAnnotations(ctx context.Context, t *te
 				t.Errorf("nodeAsn=%s, want=%s, key=%s", got, want, nodeAsnKey)
 			}
 
-			peerIpKey := strings.Replace(ccm.DefaultAnnotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
-			if got, want := node.Annotations[peerIpKey], peerIp; got != want {
-				t.Errorf("peerIp=%s, want=%s, key=%s", got, want, peerIpKey)
+			perrIPKey := strings.Replace(ccm.DefaultAnnotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
+			if got, want := node.Annotations[perrIPKey], peerIP; got != want {
+				t.Errorf("peerIp=%s, want=%s, key=%s", got, want, perrIPKey)
 			}
 		}
 	})
@@ -533,28 +533,28 @@ func (s loadBalancerSubTester) testNodeDoesntHaveAnnotations(ctx context.Context
 				t.Errorf("nodeAsn=%s, want: not found, key=%s", got, nodeAsnKey)
 			}
 
-			peerIpKey := strings.Replace(ccm.DefaultAnnotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
-			if got, ok := node.Annotations[peerIpKey]; ok != false {
-				t.Errorf("peerIp=%s, want: not found, key=%s", got, peerIpKey)
+			peerIPKey := strings.Replace(ccm.DefaultAnnotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
+			if got, ok := node.Annotations[peerIPKey]; ok != false {
+				t.Errorf("peerIp=%s, want: not found, key=%s", got, peerIPKey)
 			}
 		}
 	})
 }
 
-func (s loadBalancerSubTester) testDistinctIngressIps(ctx context.Context, t *testing.T) {
+func (s loadBalancerSubTester) testDistinctIngressIps(t *testing.T) {
 	t.Run("distinct sevice ips", func(t *testing.T) {
-		firstIp := s.firstSvc.Status.LoadBalancer.Ingress[0].IP
-		if firstIp == "" {
+		firstIP := s.firstSvc.Status.LoadBalancer.Ingress[0].IP
+		if firstIP == "" {
 			t.Errorf("first service has no ingress ip")
 		}
 
-		secondIp := s.secondSvc.Status.LoadBalancer.Ingress[0].IP
-		if secondIp == "" {
+		secondIP := s.secondSvc.Status.LoadBalancer.Ingress[0].IP
+		if secondIP == "" {
 			t.Errorf("second service has no ingress ip")
 		}
 
-		if firstIp == secondIp {
-			t.Errorf("both services have the same ingress ip: %s", firstIp)
+		if firstIP == secondIP {
+			t.Errorf("both services have the same ingress ip: %s", firstIP)
 		}
 	})
 
@@ -570,7 +570,7 @@ func fipCount(fips []cherrygo.IPAddress) int {
 	return count
 }
 
-func untilFipCount(ctx context.Context, t *testing.T, projectID, count int) error {
+func untilFipCount(ctx context.Context, projectID, count int) error {
 	const timeout = time.Second * 90
 
 	fipRemovedCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -628,18 +628,18 @@ func TestMetalLB(t *testing.T) {
 	}
 
 	subtester.testFipTags(ctx, t)
-	subtester.testServerBgpEnabled(ctx, t)
-	subtester.testProjectBgpEnabled(ctx, t)
-	subtester.testDistinctIngressIps(ctx, t)
+	subtester.testServerBgpEnabled(t)
+	subtester.testProjectBgpEnabled(t)
+	subtester.testDistinctIngressIps(t)
 
 	t.Run("remove first service", func(t *testing.T) {
-		secondSvcIp := secondSvc.Status.LoadBalancer.Ingress[0].IP
+		secondSvcIP := secondSvc.Status.LoadBalancer.Ingress[0].IP
 
 		err := env.k8sClient.CoreV1().Services(namespace).Delete(ctx, firstSvc.Name, metav1.DeleteOptions{})
 		if err != nil {
 			t.Fatalf("failed to delete service %q: %v", firstSvc.Name, err)
 		}
-		err = untilFipCount(ctx, t, env.project.ID, 1)
+		err = untilFipCount(ctx, env.project.ID, 1)
 		if err != nil {
 			t.Errorf("fip count not reduced after service removal: %v", err)
 		}
@@ -649,7 +649,7 @@ func TestMetalLB(t *testing.T) {
 			t.Fatalf("failed to get service: %v", err)
 		}
 
-		got, want := secondSvc.Status.LoadBalancer.Ingress[0].IP, secondSvcIp
+		got, want := secondSvc.Status.LoadBalancer.Ingress[0].IP, secondSvcIP
 		if got != want {
 			t.Errorf("second service's ip changed after deleting first: from %s to %s", want, got)
 		}
@@ -660,7 +660,7 @@ func TestMetalLB(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to delete service %q: %v", secondSvc.Name, err)
 		}
-		err = untilFipCount(ctx, t, env.project.ID, 0)
+		err = untilFipCount(ctx, env.project.ID, 0)
 		if err != nil {
 			t.Errorf("fip count not reduced after service removal: %v", err)
 		}
@@ -721,18 +721,18 @@ func TestKubeVipAndNodeAnnotations(t *testing.T) {
 	}
 
 	subtester.testFipTags(ctx, t)
-	subtester.testServerBgpEnabled(ctx, t)
-	subtester.testProjectBgpEnabled(ctx, t)
+	subtester.testServerBgpEnabled(t)
+	subtester.testProjectBgpEnabled(t)
 	subtester.testNodeHasAnnotations(ctx, t)
 
 	t.Run("remove first service", func(t *testing.T) {
-		secondSvcIp := secondSvc.Status.LoadBalancer.Ingress[0].IP
+		secondSvcIP := secondSvc.Status.LoadBalancer.Ingress[0].IP
 
 		err := env.k8sClient.CoreV1().Services(namespace).Delete(ctx, firstSvc.Name, metav1.DeleteOptions{})
 		if err != nil {
 			t.Fatalf("failed to delete service %q: %v", firstSvc.Name, err)
 		}
-		err = untilFipCount(ctx, t, env.project.ID, 1)
+		err = untilFipCount(ctx, env.project.ID, 1)
 		if err != nil {
 			t.Errorf("fip count not reduced after service removal: %v", err)
 		}
@@ -742,7 +742,7 @@ func TestKubeVipAndNodeAnnotations(t *testing.T) {
 			t.Fatalf("failed to get service: %v", err)
 		}
 
-		got, want := secondSvc.Status.LoadBalancer.Ingress[0].IP, secondSvcIp
+		got, want := secondSvc.Status.LoadBalancer.Ingress[0].IP, secondSvcIP
 		if got != want {
 			t.Errorf("second service's ip changed after deleting first: from %s to %s", want, got)
 		}
@@ -755,7 +755,7 @@ func TestKubeVipAndNodeAnnotations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to delete service %q: %v", secondSvc.Name, err)
 		}
-		err = untilFipCount(ctx, t, env.project.ID, 0)
+		err = untilFipCount(ctx, env.project.ID, 0)
 		if err != nil {
 			t.Errorf("fip count not reduced after service removal: %v", err)
 		}

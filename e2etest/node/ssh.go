@@ -57,7 +57,7 @@ func (s sshCmdRunner) run(addr, cmd string, stdin io.Reader) (string, error) {
 	return stdout.String(), nil
 }
 
-func NewSshCmdRunner() (*sshCmdRunner, error) {
+func NewSSHCmdRunner() (*sshCmdRunner, error) {
 	_, pri, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ed25519 keys: %w", err)

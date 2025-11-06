@@ -42,7 +42,7 @@ func setupMicrok8sNodeProvisioner(t testing.TB, testName string, projectID int) 
 	t.Helper()
 
 	// Create a SSH key signer:
-	sshRunner, err := node.NewSshCmdRunner()
+	sshRunner, err := node.NewSSHCmdRunner()
 	if err != nil {
 		t.Fatalf("failed to create SSH runner: %v", err)
 	}
@@ -63,7 +63,7 @@ func setupMicrok8sNodeProvisioner(t testing.TB, testName string, projectID int) 
 	return node.Microk8sNodeProvisioner{
 		CherryClient: *cherryClient,
 		ProjectID:    projectID,
-		SshKeyID:     strconv.Itoa(sshKey.ID),
+		SSHKeyID:     strconv.Itoa(sshKey.ID),
 		CmdRunner:    *sshRunner,
 	}
 }
@@ -110,7 +110,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 		t.Fatalf("failed to provision test node: %v", err)
 	}
 
-	err = n.LoadImage(ctx, *ccmImagePath)
+	err = n.LoadImage(*ccmImagePath)
 	if err != nil {
 		t.Fatalf("failed to load image to node")
 	}

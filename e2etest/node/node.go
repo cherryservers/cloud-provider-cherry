@@ -109,7 +109,7 @@ func (n *Node) JoinBatch(ctx context.Context, nodes []Node) []error {
 }
 
 // Remove removes the provided node from the base node.
-func (n *Node) Remove(ctx context.Context, nn *Node) error {
+func (n *Node) Remove(nn *Node) error {
 	resp, err := n.RunCmd("microk8s remove-node "+nn.Server.Hostname+" --force", nil)
 	if err != nil {
 		return fmt.Errorf("failed to remove node: %v: %s", err, resp)
@@ -163,7 +163,7 @@ func (n *Node) UntilHasProviderID(ctx context.Context) error {
 }
 
 // LoadImage side-loads a OCI image tarball onto the node.
-func (n *Node) LoadImage(ctx context.Context, ociPath string) error {
+func (n *Node) LoadImage(ociPath string) error {
 	oci, err := os.Open(ociPath)
 	if err != nil {
 		return fmt.Errorf("failed to open oci tar file: %w", err)
@@ -184,7 +184,7 @@ func (n *Node) LoadImage(ctx context.Context, ociPath string) error {
 type Microk8sNodeProvisioner struct {
 	CherryClient cherrygo.Client
 	ProjectID    int
-	SshKeyID     string
+	SSHKeyID     string
 	CmdRunner    sshCmdRunner
 }
 
@@ -239,7 +239,7 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 	}
 	userdata := base64.StdEncoding.EncodeToString(userDataRaw)
 
-	srv, err := provisionServer(ctx, np.CherryClient, np.ProjectID, userdata, np.SshKeyID)
+	srv, err := provisionServer(ctx, np.CherryClient, np.ProjectID, userdata, np.SSHKeyID)
 	if err != nil {
 		return Node{}, fmt.Errorf("failed to provision server: %w", err)
 	}

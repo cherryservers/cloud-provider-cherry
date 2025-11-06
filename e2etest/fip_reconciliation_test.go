@@ -12,7 +12,7 @@ import (
 	"github.com/cherryservers/cloud-provider-cherry-tests/node"
 )
 
-func untilIpHasTarget(ctx context.Context, ip cherrygo.IPAddress, target string) error {
+func untilIPHasTarget(ctx context.Context, ip cherrygo.IPAddress, target string) error {
 	const timeout = 180 * time.Second
 	ctx, cancel := context.WithTimeoutCause(
 		ctx, timeout, errors.New("timeout out waiting for ip to get target"))
@@ -48,7 +48,7 @@ func TestFipControlPlaneReconciliation(t *testing.T) {
 		t.Fatalf("failed to create cherry servers fip: %v", err)
 	}
 
-	err = untilIpHasTarget(ctx, fip, env.mainNode.Server.Hostname)
+	err = untilIPHasTarget(ctx, fip, env.mainNode.Server.Hostname)
 	if err != nil {
 		t.Fatalf("fip didn't get attached to cp node: %v", err)
 	}
@@ -84,12 +84,12 @@ func TestFipControlPlaneReconciliation(t *testing.T) {
 	}
 
 	// test that fip is reattached when a cp node is disabled
-	err = cp2.Remove(ctx, &env.mainNode)
+	err = cp2.Remove(&env.mainNode)
 	if err != nil {
 		t.Fatalf("couldn't remove node from cluster: %v", err)
 	}
 
-	untilIpHasTarget(ctx, fip, cp2.Server.Hostname)
+	untilIPHasTarget(ctx, fip, cp2.Server.Hostname)
 	if err != nil {
 		t.Fatalf("fip didn't get attached to cp node: %v", err)
 	}
