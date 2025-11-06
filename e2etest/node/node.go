@@ -136,6 +136,7 @@ func (n *Node) addCpLabel(ctx context.Context) error {
 
 func (n *Node) UntilHasProviderID(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, informerTimeout)
+	hasID := false
 
 	factory := informers.NewSharedInformerFactory(n.K8sclient, informerResyncPeriod)
 	_, err := factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -145,6 +146,7 @@ func (n *Node) UntilHasProviderID(ctx context.Context) error {
 				return
 			}
 			if newNode.Spec.ProviderID != "" {
+				hasID = true
 				cancel()
 			}
 		}})
@@ -154,6 +156,9 @@ func (n *Node) UntilHasProviderID(ctx context.Context) error {
 
 	factory.Start(ctx.Done())
 	factory.Shutdown()
+	if !hasID {
+		return ctx.Err()
+	}
 	return nil
 }
 
@@ -277,6 +282,7 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 func (np Microk8sNodeProvisioner) untilProvisioned(ctx context.Context, n Node) error {
 	const uninitTaint = "node.cloudprovider.kubernetes.io/uninitialized"
 	ctx, cancel := context.WithTimeout(ctx, informerTimeout)
+	provisioned := false
 
 	factory := informers.NewSharedInformerFactory(n.K8sclient, informerResyncPeriod)
 	_, err := factory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -286,10 +292,12 @@ func (np Microk8sNodeProvisioner) untilProvisioned(ctx context.Context, n Node) 
 				return
 			}
 			if newNode.Spec.ProviderID != "" {
+				provisioned = true
 				cancel()
 			} else if slices.ContainsFunc(newNode.Spec.Taints, func(t corev1.Taint) bool {
 				return t.Key == uninitTaint
 			}) {
+				provisioned = true
 				cancel()
 			}
 		}})
@@ -299,6 +307,9 @@ func (np Microk8sNodeProvisioner) untilProvisioned(ctx context.Context, n Node) 
 
 	factory.Start(ctx.Done())
 	factory.Shutdown()
+	if !provisioned {
+		return ctx.Err()
+	}
 	return nil
 }
 
