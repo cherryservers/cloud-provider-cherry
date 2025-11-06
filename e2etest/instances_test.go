@@ -44,6 +44,7 @@ func untilNodeGone(ctx context.Context, n corev1.Node, k8sClient kubernetes.Inte
 // Combining these tests allows us to re-use infrastructure,
 // which reduces test run times.
 func TestNodeAddDelete(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 
 	cfg := testEnvConfig{name: "kubernetes-ccm-test-node-add-delete"}

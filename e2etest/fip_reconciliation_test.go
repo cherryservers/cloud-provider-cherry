@@ -31,10 +31,11 @@ func untilIpHasTarget(ctx context.Context, ip cherrygo.IPAddress, target string)
 }
 
 func TestFipControlPlaneReconciliation(t *testing.T) {
+	t.Parallel()
 	const fipTag = "kubernetes-ccm-test"
 	ctx := t.Context()
 
-	cfg := testEnvConfig{name: "kubernetes-ccm-test-fip-controplane", fipTag: fipTag}
+	cfg := testEnvConfig{name: "kubernetes-ccm-test-fip-controlplane", fipTag: fipTag}
 	env := setupTestEnv(ctx, t, cfg)
 	var np batchNodeProvisioner = env.nodeProvisioner
 
