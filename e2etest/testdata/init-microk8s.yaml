@@ -1,11 +1,29 @@
 #cloud-config
-snap:
-  commands:
-    00: snap install microk8s --classic
+# Not using the snap module, because it doesn't permit
+# sleep before microk8s installation. If we don't sleep, there
+# are occasional failures to reach snap store.
+# Perhaps due to a network setup race condition?
 write_files:
-  - content: "--cloud-provider=external\n"
-    path: /var/snap/microk8s/current/args/kubelet
-    append: true
-    defer: true
+  - content: |
+      # Default launch configuration for MicroK8s.
+      # Plus, cloud-provider=external
+      ---
+      version: 0.1.0
+      extraKubeletArgs:
+        --cluster-domain: cluster.local
+        --cluster-dns: 10.152.183.10
+        --cloud-provider: external
+      addons:
+        - name: dns
+    path: /tmp/microk8s-config.yaml
 runcmd:
-  - [ bash, -lc, 'export PATH="$PATH:/snap/bin"; microk8s stop; microk8s start; microk8s status --wait-ready' ]
+  - [
+      bash,
+      -lc,
+      'mkdir -p /var/snap/microk8s/common/; cp /tmp/microk8s-config.yaml /var/snap/microk8s/common/.microk8s.yaml',
+    ]
+  - [
+      bash,
+      -lc,
+      'export PATH="$PATH:/snap/bin"; sleep 10; snap install microk8s --classic; microk8s status --wait-ready; echo "installation done at "; date --rfc-3339=ns',
+    ]

@@ -1,24 +1,34 @@
 #cloud-config
-snap:
-  commands:
-    00: snap install microk8s --classic
+# Not using the snap module, because it doesn't permit
+# sleep before microk8s installation. If we don't sleep, there
+# are occasional failures to reach snap store.
+# Perhaps due to a network setup race condition?
 write_files:
-  - content: "--cloud-provider=external\n"
-    path: /var/snap/microk8s/current/args/kubelet
-    append: true
-    defer: true
-  - content: "--ipvs-strict-arp\n"
-    path: "/var/snap/microk8s/current/args/kube-proxy"
-    append: true
-    defer: true
+  - content: |
+      # Default launch configuration for MicroK8s.
+      # Plus, cloud-provider=external.
+      ---
+      version: 0.1.0
+      extraKubeletArgs:
+        --cluster-domain: cluster.local
+        --cluster-dns: 10.152.183.10
+        --cloud-provider: external
+      addons:
+        - name: dns
+    path: /tmp/microk8s-config.yaml
 runcmd:
-  # We need to delete the node (it gets re-created on microk8s restart) for it to have
-  # the node.cloudprovider.kubernetes.io/uninitialized taint.
-  # It's only a problem when --ipvs-strict-arp is set. I'm not exactly sure
-  # what causes the issue, but it's probably something to do with node being
-  # registered too early. 
-  - [ bash, -lc, 'export PATH="$PATH:/snap/bin"; N=$(microk8s kubectl get nodes -o jsonpath="{.items[0].metadata.name}"); microk8s kubectl delete node "$N" --grace-period=0 --force --wait=false || true' ]
-
-  - [ bash, -lc, 'export PATH="$PATH:/snap/bin"; microk8s stop; microk8s start; microk8s status --wait-ready' ]
-
-  - [ bash, -lc, 'export PATH="$PATH:/snap/bin"; microk8s kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml' ]
+  - [
+      bash,
+      -lc,
+      "mkdir -p /var/snap/microk8s/common/; cp /tmp/microk8s-config.yaml /var/snap/microk8s/common/.microk8s.yaml",
+    ]
+  - [
+      bash,
+      -lc,
+      'export PATH="$PATH:/snap/bin"; sleep 10; snap install microk8s --classic; microk8s status --wait-ready; echo "installation done at "; date --rfc-3339=ns',
+    ]
+  - [
+      bash,
+      -lc,
+      'export PATH="$PATH:/snap/bin"; microk8s kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml',
+    ]
