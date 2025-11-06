@@ -192,10 +192,10 @@ func (n *Node) LoadImage(ociPath string) error {
 }
 
 type Microk8sNodeProvisioner struct {
-	CherryClient cherrygo.Client
-	ProjectID    int
-	SSHKeyID     string
-	CmdRunner    sshCmdRunner
+	cherryClient cherrygo.Client
+	projectID    int
+	sshKeyID     string
+	cmdRunner    sshCmdRunner
 }
 
 // Provision creates a Cherry Servers server and waits for k8s to be running.
@@ -249,7 +249,7 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 	}
 	userdata := base64.StdEncoding.EncodeToString(userDataRaw)
 
-	srv, err := provisionServer(ctx, np.CherryClient, np.ProjectID, userdata, np.SSHKeyID)
+	srv, err := provisionServer(ctx, np.cherryClient, np.projectID, userdata, np.sshKeyID)
 	if err != nil {
 		return Node{}, fmt.Errorf("failed to provision server: %w", err)
 	}
@@ -261,14 +261,14 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 
 	backoff.ExpBackoffWithContext(func() (bool, error) {
 		// Check if kube-api is reachable. Non-zero exit code will be returned if not.
-		_, err = np.CmdRunner.run(ip, "microk8s kubectl get nodes --no-headers", nil)
+		_, err = np.cmdRunner.run(ip, "microk8s kubectl get nodes --no-headers", nil)
 		if err != nil {
 			return false, nil
 		}
 		return true, nil
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
 
-	kubeconfig, err := np.CmdRunner.run(ip, "microk8s config", nil)
+	kubeconfig, err := np.cmdRunner.run(ip, "microk8s config", nil)
 	if err != nil {
 		return Node{}, fmt.Errorf("failed to get k8s config for node %q: %w", srv.Hostname, err)
 	}
@@ -278,7 +278,7 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 		return Node{}, fmt.Errorf("failed to create k8s client for node %q: %w", srv.Hostname, err)
 	}
 
-	n := Node{Server: srv, cmdRunner: np.CmdRunner, K8sclient: k8sclient}
+	n := Node{Server: srv, cmdRunner: np.cmdRunner, K8sclient: k8sclient}
 	n.addCpLabel(ctx)
 	err = np.untilProvisioned(ctx, n)
 	if err != nil {
@@ -324,9 +324,9 @@ func (np Microk8sNodeProvisioner) untilProvisioned(ctx context.Context, n Node) 
 }
 
 func (np Microk8sNodeProvisioner) Cleanup() error {
-	_, projectErr := np.CherryClient.Projects.Delete(np.ProjectID)
-	sshID, convErr := strconv.Atoi(np.SSHKeyID)
-	_, _, sshErr := np.CherryClient.SSHKeys.Delete(sshID)
+	_, projectErr := np.cherryClient.Projects.Delete(np.projectID)
+	sshID, convErr := strconv.Atoi(np.sshKeyID)
+	_, _, sshErr := np.cherryClient.SSHKeys.Delete(sshID)
 	return errors.Join(projectErr, convErr, sshErr)
 }
 
@@ -349,10 +349,10 @@ func NewMicrok8sNodeProvisioner(testName string, projectID int, cc cherrygo.Clie
 	}
 
 	return Microk8sNodeProvisioner{
-		CherryClient: cc,
-		ProjectID:    projectID,
-		SSHKeyID:     strconv.Itoa(sshKey.ID),
-		CmdRunner:    *sshRunner,
+		cherryClient: cc,
+		projectID:    projectID,
+		sshKeyID:     strconv.Itoa(sshKey.ID),
+		cmdRunner:    *sshRunner,
 	}, nil
 }
 
