@@ -8,10 +8,12 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cherryservers/cherrygo/v3"
+	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
@@ -311,6 +313,32 @@ func (np Microk8sNodeProvisioner) untilProvisioned(ctx context.Context, n Node) 
 		return ctx.Err()
 	}
 	return nil
+}
+
+func NewMicrok8sNodeProvisioner(testName string, projectID int, cc cherrygo.Client) (Microk8sNodeProvisioner, error) {
+	// Create a SSH key signer:
+	sshRunner, err := NewSSHCmdRunner()
+	if err != nil {
+		return Microk8sNodeProvisioner{}, fmt.Errorf("failed to create SSH runner: %v", err)
+	}
+
+	// Create SSH key on Cherry servers:
+	pub := ssh.MarshalAuthorizedKey(sshRunner.Signer.PublicKey())
+	pub = pub[:len(pub)-1] // strip newline
+	sshKey, _, err := cc.SSHKeys.Create(&cherrygo.CreateSSHKey{
+		Label: testName,
+		Key:   string(pub),
+	})
+	if err != nil {
+		return Microk8sNodeProvisioner{}, fmt.Errorf("failed to create SSH key on cherry servers: %v", err)
+	}
+
+	return Microk8sNodeProvisioner{
+		CherryClient: cc,
+		ProjectID:    projectID,
+		SSHKeyID:     strconv.Itoa(sshKey.ID),
+		CmdRunner:    *sshRunner,
+	}, nil
 }
 
 func serverPublicIP(srv cherrygo.Server) (string, error) {

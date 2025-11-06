@@ -5,12 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-
 	"strconv"
+
 	"testing"
 
 	"github.com/cherryservers/cherrygo/v3"
-	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/cherryservers/cloud-provider-cherry-tests/node"
@@ -36,36 +35,6 @@ func setupProject(t testing.TB, name string) cherrygo.Project {
 		//cherryClient.Projects.Delete(project.ID)
 	})
 	return project
-}
-
-func setupMicrok8sNodeProvisioner(t testing.TB, testName string, projectID int) node.Microk8sNodeProvisioner {
-	t.Helper()
-
-	// Create a SSH key signer:
-	sshRunner, err := node.NewSSHCmdRunner()
-	if err != nil {
-		t.Fatalf("failed to create SSH runner: %v", err)
-	}
-
-	// Create SSH key on Cherry servers:
-	pub := ssh.MarshalAuthorizedKey(sshRunner.Signer.PublicKey())
-	pub = pub[:len(pub)-1] // strip newline
-	sshKey, _, err := cherryClient.SSHKeys.Create(&cherrygo.CreateSSHKey{
-		Label: testName,
-		Key:   string(pub),
-	})
-	if err != nil {
-		t.Fatalf("failed to create SSH key on cherry servers: %v", err)
-	}
-	t.Cleanup(func() {
-		cherryClient.SSHKeys.Delete(sshKey.ID)
-	})
-	return node.Microk8sNodeProvisioner{
-		CherryClient: *cherryClient,
-		ProjectID:    projectID,
-		SSHKeyID:     strconv.Itoa(sshKey.ID),
-		CmdRunner:    *sshRunner,
-	}
 }
 
 type testEnv struct {
@@ -96,10 +65,16 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	project := setupProject(t, cfg.name)
 
 	// Setup node provisioner:
-	np := setupMicrok8sNodeProvisioner(t, cfg.name, project.ID)
+	np, err := node.NewMicrok8sNodeProvisioner(cfg.name, project.ID, *cherryClient)
+	if err != nil {
+		t.Fatalf("failed to setup node provisioner: %v", err)
+	}
+	t.Cleanup(func() {
+		id, _ := strconv.Atoi(np.SSHKeyID)
+		cherryClient.SSHKeys.Delete(id)
+	})
 
 	// Create a node (server with k8s running):
-	var err error
 	var n node.Node
 	if cfg.loadBalancer != metallbSetting {
 		n, err = np.Provision(t.Context())
