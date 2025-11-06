@@ -128,9 +128,10 @@ func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
 		[]byte("imagePullPolicy: Always"),
 		[]byte("imagePullPolicy: Never"), 1)
 
-	r, err := n.RunCmd("microk8s kubectl apply -f - ", bytes.NewReader(manifest))
+	
+	err = n.Deploy(bytes.NewReader(manifest))
 	if err != nil {
-		t.Fatalf("failed to apply manifest: %s", r)
+		t.Fatalf("failed to deploy ccm: %v", err)
 	}
 
 	// when node.cloudprovider.kubernetes.io/uninitialized

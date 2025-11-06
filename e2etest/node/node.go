@@ -36,6 +36,14 @@ type Node struct {
 	cmdRunner sshCmdRunner
 }
 
+func (n Node) Deploy(manifest io.Reader) error {
+	r, err := n.RunCmd("microk8s kubectl apply -f - ", manifest)
+	if err != nil {
+		return fmt.Errorf("failed to apply manifest: %s", r)
+	}
+	return nil
+}
+
 // RunCmd runs a shell command on the node via SSH.
 // Passing nil stdin is fine.
 func (n Node) RunCmd(cmd string, stdin io.Reader) (resp string, err error) {
