@@ -11,7 +11,7 @@ import (
 )
 
 type sshCmdRunner struct {
-	Signer ssh.Signer
+	signer ssh.Signer
 }
 
 func (s sshCmdRunner) dial(addr string) (*ssh.Client, error) {
@@ -19,7 +19,7 @@ func (s sshCmdRunner) dial(addr string) (*ssh.Client, error) {
 
 	cfg := ssh.ClientConfig{
 		User:            "root",
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(s.Signer)},
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(s.signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 	client, err := ssh.Dial("tcp", addr+":"+port, &cfg)
@@ -57,7 +57,7 @@ func (s sshCmdRunner) run(addr, cmd string, stdin io.Reader) (string, error) {
 	return stdout.String(), nil
 }
 
-func NewSSHCmdRunner() (*sshCmdRunner, error) {
+func newSSHCmdRunner() (*sshCmdRunner, error) {
 	_, pri, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ed25519 keys: %w", err)

@@ -332,13 +332,13 @@ func (np Microk8sNodeProvisioner) Cleanup() error {
 
 func NewMicrok8sNodeProvisioner(testName string, projectID int, cc cherrygo.Client) (Microk8sNodeProvisioner, error) {
 	// Create a SSH key signer:
-	sshRunner, err := NewSSHCmdRunner()
+	sshRunner, err := newSSHCmdRunner()
 	if err != nil {
 		return Microk8sNodeProvisioner{}, fmt.Errorf("failed to create SSH runner: %v", err)
 	}
 
 	// Create SSH key on Cherry servers:
-	pub := ssh.MarshalAuthorizedKey(sshRunner.Signer.PublicKey())
+	pub := ssh.MarshalAuthorizedKey(sshRunner.signer.PublicKey())
 	pub = pub[:len(pub)-1] // strip newline
 	sshKey, _, err := cc.SSHKeys.Create(&cherrygo.CreateSSHKey{
 		Label: testName,

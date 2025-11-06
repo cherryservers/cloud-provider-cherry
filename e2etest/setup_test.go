@@ -128,7 +128,6 @@ func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
 		[]byte("imagePullPolicy: Always"),
 		[]byte("imagePullPolicy: Never"), 1)
 
-	
 	err = n.Deploy(bytes.NewReader(manifest))
 	if err != nil {
 		t.Fatalf("failed to deploy ccm: %v", err)
