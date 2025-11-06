@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"strconv"
 
 	"testing"
 
@@ -31,9 +30,6 @@ func setupProject(t testing.TB, name string) cherrygo.Project {
 	if err != nil {
 		t.Fatalf("failed to setup cherry servers project: %v", err)
 	}
-	t.Cleanup(func() {
-		//cherryClient.Projects.Delete(project.ID)
-	})
 	return project
 }
 
@@ -70,8 +66,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 		t.Fatalf("failed to setup node provisioner: %v", err)
 	}
 	t.Cleanup(func() {
-		id, _ := strconv.Atoi(np.SSHKeyID)
-		cherryClient.SSHKeys.Delete(id)
+		np.Cleanup()
 	})
 
 	// Create a node (server with k8s running):

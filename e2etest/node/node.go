@@ -315,6 +315,13 @@ func (np Microk8sNodeProvisioner) untilProvisioned(ctx context.Context, n Node) 
 	return nil
 }
 
+func (np Microk8sNodeProvisioner) Cleanup() error {
+	_, projectErr := np.CherryClient.Projects.Delete(np.ProjectID)
+	sshID, convErr := strconv.Atoi(np.SSHKeyID)
+	_, _, sshErr := np.CherryClient.SSHKeys.Delete(sshID)
+	return errors.Join(projectErr, convErr, sshErr)
+}
+
 func NewMicrok8sNodeProvisioner(testName string, projectID int, cc cherrygo.Client) (Microk8sNodeProvisioner, error) {
 	// Create a SSH key signer:
 	sshRunner, err := NewSSHCmdRunner()
