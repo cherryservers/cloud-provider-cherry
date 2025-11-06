@@ -29,7 +29,7 @@ import (
 )
 
 // Ensures project has non-zero ASN.
-func ensureProjectAsn(ctx context.Context, t testing.TB, project *cherrygo.Project, projectServer cherrygo.Server) {
+func ensureProjectAsn(ctx context.Context, t testing.TB, project cherrygo.Project, projectServer cherrygo.Server) cherrygo.Project {
 	// We need a local ASN to deploy kube-vip, but
 	// cherry servers only assigns a local ASN
 	// to a project once there's a server with BGP enabled.
@@ -44,7 +44,7 @@ func ensureProjectAsn(ctx context.Context, t testing.TB, project *cherrygo.Proje
 	}
 
 	err = backoff.ExpBackoffWithContext(func() (bool, error) {
-		*project, _, err = cherryClient.Projects.Get(project.ID, nil)
+		project, _, err = cherryClient.Projects.Get(project.ID, nil)
 		if err != nil {
 			return false, fmt.Errorf("failed to get project: %w", err)
 		}
@@ -61,6 +61,8 @@ func ensureProjectAsn(ctx context.Context, t testing.TB, project *cherrygo.Proje
 	if err != nil {
 		t.Fatalf("failed to disable bgp on server %q: %v", projectServer.Hostname, err)
 	}
+
+	return project
 }
 
 type kubeHelpers struct {
@@ -678,7 +680,7 @@ func TestKubeVipAndNodeAnnotations(t *testing.T) {
 	})
 
 	// We need a local ASN to deploy kube-vip.
-	ensureProjectAsn(ctx, t, &env.project, env.mainNode.Server)
+	env.project = ensureProjectAsn(ctx, t, env.project, env.mainNode.Server)
 
 	kubeHelper := kubeHelpers{t, env.k8sClient}
 
