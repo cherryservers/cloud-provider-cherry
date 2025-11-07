@@ -45,11 +45,11 @@ func untilNodeGone(ctx context.Context, n corev1.Node, k8sClient kubernetes.Inte
 // which reduces test run times.
 func TestNodeAddDelete(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
 
 	cfg := testEnvConfig{name: "kubernetes-ccm-test-node-add-delete"}
 
-	env := setupTestEnv(ctx, t, cfg)
+	env := setupTestEnv(t, cfg)
+	ctx := env.ctx
 	var np nodeProvisioner = env.nodeProvisioner
 
 	n, err := np.Provision(ctx)

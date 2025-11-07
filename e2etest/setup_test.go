@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"time"
 
 	"testing"
 
@@ -38,6 +39,7 @@ type testEnv struct {
 	mainNode        node.Node
 	nodeProvisioner node.Microk8sNodeProvisioner
 	k8sClient       kubernetes.Interface
+	ctx             context.Context
 }
 
 type testEnvConfig struct {
@@ -54,8 +56,9 @@ type batchNodeProvisioner interface {
 	ProvisionBatch(context.Context, int) ([]node.Node, []error)
 }
 
-func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv {
+func setupTestEnv(t *testing.T, cfg testEnvConfig) *testEnv {
 	t.Helper()
+	ctx, _ := beforeTimeoutCtx(t)
 
 	// Setup project:
 	project := setupProject(t, cfg.name)
@@ -65,6 +68,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	if err != nil {
 		t.Fatalf("failed to setup node provisioner: %v", err)
 	}
+
 	if *cleanup {
 		t.Cleanup(func() {
 			np.Cleanup()
@@ -74,9 +78,9 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	// Create a node (server with k8s running):
 	var n node.Node
 	if cfg.loadBalancer != metallbSetting {
-		n, err = np.Provision(t.Context())
+		n, err = np.Provision(ctx)
 	} else {
-		n, err = np.ProvisionWithMetalLB(t.Context())
+		n, err = np.ProvisionWithMetalLB(ctx)
 	}
 	if err != nil {
 		t.Fatalf("failed to provision test node: %v", err)
@@ -99,6 +103,7 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 		mainNode:        n,
 		k8sClient:       n.K8sclient,
 		nodeProvisioner: np,
+		ctx: ctx,
 	}
 }
 
@@ -138,4 +143,14 @@ func deployCcm(ctx context.Context, t testing.TB, n node.Node, cfg ccm.Config) {
 	// when node.cloudprovider.kubernetes.io/uninitialized
 	// is gone, the ccm is running.
 	n.UntilHasProviderID(ctx)
+}
+
+func beforeTimeoutCtx(t *testing.T) (context.Context, context.CancelFunc) {
+	const cleanupPadding = time.Minute * 2
+	deadline, ok := t.Deadline()
+	if ok {
+		return context.WithDeadline(t.Context(), deadline.Add(-cleanupPadding))
+	}
+	return context.WithCancel(t.Context())
+
 }

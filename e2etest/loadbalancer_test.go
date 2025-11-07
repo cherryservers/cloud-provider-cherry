@@ -594,11 +594,11 @@ func TestMetalLB(t *testing.T) {
 	t.Parallel()
 	const testName = "kubernetes-ccm-test-lb-metal-lb"
 	const namespace = metav1.NamespaceDefault
-	ctx := t.Context()
 
-	env := setupTestEnv(ctx, t, testEnvConfig{
+	env := setupTestEnv(t, testEnvConfig{
 		name: testName, loadBalancer: metallbSetting,
 	})
+	ctx := env.ctx
 
 	kubeHelper := kubeHelpers{t, env.k8sClient}
 
@@ -675,11 +675,11 @@ func TestMetalLB(t *testing.T) {
 func TestKubeVipAndNodeAnnotations(t *testing.T) {
 	t.Parallel()
 	const testName = "kubernetes-ccm-test-lb-kube-vip"
-	ctx := t.Context()
 
-	env := setupTestEnv(ctx, t, testEnvConfig{
+	env := setupTestEnv(t, testEnvConfig{
 		name: testName, loadBalancer: kubeVipSetting,
 	})
+	ctx := env.ctx
 
 	// We need a local ASN to deploy kube-vip.
 	env.project = ensureProjectAsn(ctx, t, env.project, env.mainNode.Server)
