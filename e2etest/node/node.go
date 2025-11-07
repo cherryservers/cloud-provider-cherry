@@ -204,12 +204,6 @@ func (np Microk8sNodeProvisioner) Provision(ctx context.Context) (Node, error) {
 	return np.provision(ctx, userDataPath)
 }
 
-// ProvisionWithMetalLB creates a Cherry Servers server and waits for k8s and metallb to be running.
-func (np Microk8sNodeProvisioner) ProvisionWithMetalLB(ctx context.Context) (Node, error) {
-	const userDataPathWithMetalLB = "./testdata/init-microk8s-with-metallb.yaml"
-	return np.provision(ctx, userDataPathWithMetalLB)
-}
-
 // ProvisionBatch wraps provision to create n Cherry Servers servers
 // in a concurrent manner.
 func (np Microk8sNodeProvisioner) ProvisionBatch(ctx context.Context, n int) ([]Node, []error) {

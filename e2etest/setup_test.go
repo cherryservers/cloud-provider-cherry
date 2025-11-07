@@ -76,12 +76,7 @@ func setupTestEnv(t *testing.T, cfg testEnvConfig) *testEnv {
 	}
 
 	// Create a node (server with k8s running):
-	var n node.Node
-	if cfg.loadBalancer != metallbSetting {
-		n, err = np.Provision(ctx)
-	} else {
-		n, err = np.ProvisionWithMetalLB(ctx)
-	}
+	n, err := np.Provision(ctx)
 	if err != nil {
 		t.Fatalf("failed to provision test node: %v", err)
 	}

@@ -1,11 +1,14 @@
 package e2etest
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"maps"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -590,6 +593,32 @@ func untilFipCount(ctx context.Context, projectID, count int) error {
 	}, backoff.DefaultExpBackoffConfigWithContext(fipRemovedCtx))
 }
 
+func getMetalLBManifest(ctx context.Context, t *testing.T) io.Reader {
+	t.Helper()
+	const url = "https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml"
+
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("failed to create request for metallb manifest: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("failed get request for metallb manifest: %v", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body for metallb manifest resp: %v", err)
+	}
+
+	return bytes.NewReader(data)
+}
+
 func TestMetalLB(t *testing.T) {
 	t.Parallel()
 	const testName = "kubernetes-ccm-test-lb-metal-lb"
@@ -599,6 +628,7 @@ func TestMetalLB(t *testing.T) {
 		name: testName, loadBalancer: metallbSetting,
 	})
 	ctx := env.ctx
+	env.mainNode.Deploy(getMetalLBManifest(ctx, t))
 
 	kubeHelper := kubeHelpers{t, env.k8sClient}
 
