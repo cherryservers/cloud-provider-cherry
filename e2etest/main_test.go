@@ -11,22 +11,25 @@ import (
 )
 
 const (
-	apiTokenVar  = "CHERRY_TEST_API_TOKEN"
-	teamIDVar    = "CHERRY_TEST_TEAM_ID"
-	imagePathVar = "CCM_IMG_PATH"
-	noCleanupVar = "NO_CLEANUP"
+	apiTokenVar   = "CHERRY_TEST_API_TOKEN"
+	teamIDVar     = "CHERRY_TEST_TEAM_ID"
+	imagePathVar  = "CCM_IMG_PATH"
+	noCleanupVar  = "NO_CLEANUP"
+	k8sVersionVar = "K8S_VERSION"
 )
 
 var cherryClient *cherrygo.Client
 var teamID *int
 var ccmImagePath *string
 var cleanup *bool
+var k8sVersion *string
 
 type config struct {
 	apiToken     string
 	teamID       int
 	ccmImagePath string
 	cleanup      bool
+	k8sVersion   string
 }
 
 // loadConfig loads test configuration from environment variables.
@@ -37,20 +40,25 @@ func loadConfig() (config, error) {
 	}
 
 	noCleanup := false
-	noCleanupEnv, ok := os.LookupEnv(noCleanupVar)
-	if ok {
+	if noCleanupEnv, ok := os.LookupEnv(noCleanupVar); ok {
 		noCleanup, err = strconv.ParseBool(noCleanupEnv)
 		if err != nil {
 			return config{}, fmt.Errorf("failed to parse %s var: %w", noCleanupVar, err)
 		}
 	}
 
+	k8sVersion := "1.34"
+	if k8sVersionEnv, ok := os.LookupEnv(k8sVersionVar); ok {
+		k8sVersion = k8sVersionEnv
+	}
+
 	return config{
-			apiToken:     os.Getenv(apiTokenVar),
-			teamID:       teamID,
-			ccmImagePath: os.Getenv(imagePathVar),
-			cleanup:      !noCleanup},
-		nil
+		apiToken:     os.Getenv(apiTokenVar),
+		teamID:       teamID,
+		ccmImagePath: os.Getenv(imagePathVar),
+		cleanup:      !noCleanup,
+		k8sVersion:   k8sVersion,
+	}, nil
 }
 
 func runMain(m *testing.M) int {
@@ -67,6 +75,7 @@ func runMain(m *testing.M) int {
 	teamID = &cfg.teamID
 	ccmImagePath = &cfg.ccmImagePath
 	cleanup = &cfg.cleanup
+	k8sVersion = &cfg.k8sVersion
 
 	code := m.Run()
 	return code

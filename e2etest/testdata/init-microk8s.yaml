@@ -25,5 +25,5 @@ runcmd:
   - [
       bash,
       -lc,
-      'export PATH="$PATH:/snap/bin"; sleep 10; snap install microk8s --classic; microk8s status --wait-ready; echo "installation done at "; date --rfc-3339=ns',
+      'export PATH="$PATH:/snap/bin"; sleep 10; snap install microk8s --classic --channel=K8S_VERSION/stable; microk8s status --wait-ready; echo "installation done at "; date --rfc-3339=ns',
     ]

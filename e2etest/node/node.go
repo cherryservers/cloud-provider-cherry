@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -196,43 +197,16 @@ type Microk8sNodeProvisioner struct {
 	projectID    int
 	sshKeyID     string
 	cmdRunner    sshCmdRunner
+	k8sVersion string
 }
 
 // Provision creates a Cherry Servers server and waits for k8s to be running.
 func (np Microk8sNodeProvisioner) Provision(ctx context.Context) (Node, error) {
-	const userDataPath = "./testdata/init-microk8s.yaml"
-	return np.provision(ctx, userDataPath)
-}
-
-// ProvisionBatch wraps provision to create n Cherry Servers servers
-// in a concurrent manner.
-func (np Microk8sNodeProvisioner) ProvisionBatch(ctx context.Context, n int) ([]Node, []error) {
-	type p struct {
-		nn  Node
-		err error
-	}
-
-	nodes := make([]Node, n)
-	errs := make([]error, n)
-	c := make(chan p, n)
-
-	for range n {
-		go func() {
-			nn, err := np.Provision(ctx)
-			c <- p{nn: nn, err: err}
-		}()
-	}
-	for i := range n {
-		provisioned := <-c
-		nodes[i] = provisioned.nn
-		errs[i] = provisioned.err
-
-	}
-	return nodes, errs
-}
-
-func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath string) (Node, error) {
-	const timeout = 513 * time.Second
+	const (
+		userDataPath = "./testdata/init-microk8s.yaml"
+		k8sVersionVar = "K8S_VERSION"
+		timeout = 513 * time.Second
+	)
 
 	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errors.New("node provision timeout"))
 	defer cancel()
@@ -241,6 +215,7 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 	if err != nil {
 		return Node{}, fmt.Errorf("failed to read user data file: %w", err)
 	}
+	userDataRaw = bytes.ReplaceAll(userDataRaw, []byte(k8sVersionVar), []byte(np.k8sVersion))
 	userdata := base64.StdEncoding.EncodeToString(userDataRaw)
 
 	srv, err := provisionServer(ctx, np.cherryClient, np.projectID, userdata, np.sshKeyID)
@@ -282,6 +257,33 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 		return Node{}, fmt.Errorf("node didn't reach provisioned state: %w", err)
 	}
 	return n, nil
+}
+
+// ProvisionBatch wraps provision to create n Cherry Servers servers
+// in a concurrent manner.
+func (np Microk8sNodeProvisioner) ProvisionBatch(ctx context.Context, n int) ([]Node, []error) {
+	type p struct {
+		nn  Node
+		err error
+	}
+
+	nodes := make([]Node, n)
+	errs := make([]error, n)
+	c := make(chan p, n)
+
+	for range n {
+		go func() {
+			nn, err := np.Provision(ctx)
+			c <- p{nn: nn, err: err}
+		}()
+	}
+	for i := range n {
+		provisioned := <-c
+		nodes[i] = provisioned.nn
+		errs[i] = provisioned.err
+
+	}
+	return nodes, errs
 }
 
 // wait until node has provider ID or is tainted with
@@ -327,7 +329,7 @@ func (np Microk8sNodeProvisioner) Cleanup() error {
 	return errors.Join(projectErr, convErr, sshErr)
 }
 
-func NewMicrok8sNodeProvisioner(testName string, projectID int, cc cherrygo.Client) (Microk8sNodeProvisioner, error) {
+func NewMicrok8sNodeProvisioner(testName, k8sVersion string, projectID int, cc cherrygo.Client) (Microk8sNodeProvisioner, error) {
 	// Create a SSH key signer:
 	sshRunner, err := newSSHCmdRunner()
 	if err != nil {
@@ -350,6 +352,7 @@ func NewMicrok8sNodeProvisioner(testName string, projectID int, cc cherrygo.Clie
 		projectID:    projectID,
 		sshKeyID:     strconv.Itoa(sshKey.ID),
 		cmdRunner:    *sshRunner,
+		k8sVersion: k8sVersion,
 	}, nil
 }
 

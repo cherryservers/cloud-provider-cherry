@@ -64,7 +64,7 @@ func setupTestEnv(t *testing.T, cfg testEnvConfig) *testEnv {
 	project := setupProject(t, cfg.name)
 
 	// Setup node provisioner:
-	np, err := node.NewMicrok8sNodeProvisioner(cfg.name, project.ID, *cherryClient)
+	np, err := node.NewMicrok8sNodeProvisioner(cfg.name, *k8sVersion, project.ID, *cherryClient)
 	if err != nil {
 		t.Fatalf("failed to setup node provisioner: %v", err)
 	}
@@ -98,7 +98,7 @@ func setupTestEnv(t *testing.T, cfg testEnvConfig) *testEnv {
 		mainNode:        n,
 		k8sClient:       n.K8sclient,
 		nodeProvisioner: np,
-		ctx: ctx,
+		ctx:             ctx,
 	}
 }
 
