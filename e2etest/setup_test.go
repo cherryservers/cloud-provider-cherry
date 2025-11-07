@@ -65,9 +65,11 @@ func setupTestEnv(ctx context.Context, t testing.TB, cfg testEnvConfig) *testEnv
 	if err != nil {
 		t.Fatalf("failed to setup node provisioner: %v", err)
 	}
-	t.Cleanup(func() {
-		np.Cleanup()
-	})
+	if *cleanup {
+		t.Cleanup(func() {
+			np.Cleanup()
+		})
+	}
 
 	// Create a node (server with k8s running):
 	var n node.Node
