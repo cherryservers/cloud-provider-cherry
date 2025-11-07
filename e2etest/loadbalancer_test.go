@@ -138,6 +138,7 @@ func (k *kubeHelpers) setupKubeVipRbac(ctx context.Context, namespace string) (s
 }
 
 type kubeVipConfig struct {
+	version     string
 	localAsn    string
 	peerAsn     string
 	peerAddress string
@@ -148,7 +149,6 @@ func (k *kubeHelpers) setupKubeVip(ctx context.Context, cfg kubeVipConfig) {
 	k.t.Helper()
 
 	const name = "kube-vip-ds"
-	const version = "v1.0.1"
 	const nameLabel = "app.kubernetes.io/name"
 	const versionLabel = "app.kubernetes.io/version"
 	const namespace = metav1.NamespaceSystem
@@ -157,7 +157,7 @@ func (k *kubeHelpers) setupKubeVip(ctx context.Context, cfg kubeVipConfig) {
 
 	kubeVipDaemonSet := appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:    map[string]string{nameLabel: name, versionLabel: version},
+			Labels:    map[string]string{nameLabel: name, versionLabel: cfg.version},
 			Name:      name,
 			Namespace: namespace,
 		},
@@ -167,7 +167,7 @@ func (k *kubeHelpers) setupKubeVip(ctx context.Context, cfg kubeVipConfig) {
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels:    map[string]string{nameLabel: name, versionLabel: version},
+					Labels:    map[string]string{nameLabel: name, versionLabel: cfg.version},
 					Name:      name,
 					Namespace: namespace,
 				},
@@ -593,9 +593,9 @@ func untilFipCount(ctx context.Context, projectID, count int) error {
 	}, backoff.DefaultExpBackoffConfigWithContext(fipRemovedCtx))
 }
 
-func getMetalLBManifest(ctx context.Context, t *testing.T) io.Reader {
+func getMetalLBManifest(ctx context.Context, t *testing.T, version string) io.Reader {
 	t.Helper()
-	const url = "https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml"
+	url := fmt.Sprintf("https://raw.githubusercontent.com/metallb/metallb/v%s/config/manifests/metallb-native.yaml", version)
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
@@ -628,7 +628,7 @@ func TestMetalLB(t *testing.T) {
 		name: testName, loadBalancer: metallbSetting,
 	})
 	ctx := env.ctx
-	env.mainNode.Deploy(getMetalLBManifest(ctx, t))
+	env.mainNode.Deploy(getMetalLBManifest(ctx, t, *metalLBVersion))
 
 	kubeHelper := kubeHelpers{t, env.k8sClient}
 
@@ -721,6 +721,7 @@ func TestKubeVipAndNodeAnnotations(t *testing.T) {
 		peerAsn:     strconv.Itoa(env.mainNode.Server.Region.BGP.Asn),
 		peerAddress: env.mainNode.Server.Region.BGP.Hosts[0],
 		routerID:    env.mainNode.Server.IPAddresses[0].Address,
+		version:     *kubeVipVersion,
 	})
 
 	const namespace = metav1.NamespaceDefault
