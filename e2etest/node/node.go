@@ -197,15 +197,15 @@ type Microk8sNodeProvisioner struct {
 	projectID    int
 	sshKeyID     string
 	cmdRunner    sshCmdRunner
-	k8sVersion string
+	k8sVersion   string
 }
 
 // Provision creates a Cherry Servers server and waits for k8s to be running.
 func (np Microk8sNodeProvisioner) Provision(ctx context.Context) (Node, error) {
 	const (
-		userDataPath = "./testdata/init-microk8s.yaml"
+		userDataPath  = "./testdata/init-microk8s.yaml"
 		k8sVersionVar = "K8S_VERSION"
-		timeout = 513 * time.Second
+		timeout       = 513 * time.Second
 	)
 
 	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errors.New("node provision timeout"))
@@ -352,7 +352,7 @@ func NewMicrok8sNodeProvisioner(testName, k8sVersion string, projectID int, cc c
 		projectID:    projectID,
 		sshKeyID:     strconv.Itoa(sshKey.ID),
 		cmdRunner:    *sshRunner,
-		k8sVersion: k8sVersion,
+		k8sVersion:   k8sVersion,
 	}, nil
 }
 
