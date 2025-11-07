@@ -89,7 +89,7 @@ func TestFipControlPlaneReconciliation(t *testing.T) {
 		t.Fatalf("couldn't remove node from cluster: %v", err)
 	}
 
-	untilIPHasTarget(ctx, fip, cp2.Server.Hostname)
+	err = untilIPHasTarget(ctx, fip, cp2.Server.Hostname)
 	if err != nil {
 		t.Fatalf("fip didn't get attached to cp node: %v", err)
 	}

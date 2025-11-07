@@ -259,7 +259,7 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 		return Node{}, err
 	}
 
-	backoff.ExpBackoffWithContext(func() (bool, error) {
+	err = backoff.ExpBackoffWithContext(func() (bool, error) {
 		// Check if kube-api is reachable. Non-zero exit code will be returned if not.
 		_, err = np.cmdRunner.run(ip, "microk8s kubectl get nodes --no-headers", nil)
 		if err != nil {
@@ -267,6 +267,9 @@ func (np Microk8sNodeProvisioner) provision(ctx context.Context, userDataPath st
 		}
 		return true, nil
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
+	if err != nil {
+		return Node{}, fmt.Errorf("node kube-api didn't become reachable: %w", err)
+	}
 
 	kubeconfig, err := np.cmdRunner.run(ip, "microk8s config", nil)
 	if err != nil {
@@ -392,7 +395,7 @@ func provisionServer(ctx context.Context, cc cherrygo.Client, projectID int, use
 		return cherrygo.Server{}, fmt.Errorf("failed to create server: %w", err)
 	}
 
-	backoff.ExpBackoffWithContext(func() (bool, error) {
+	err = backoff.ExpBackoffWithContext(func() (bool, error) {
 		srv, _, err = cc.Servers.Get(srv.ID, nil)
 		if err != nil {
 			return false, fmt.Errorf("failed to get server: %w", err)
@@ -402,6 +405,9 @@ func provisionServer(ctx context.Context, cc cherrygo.Client, projectID int, use
 		}
 		return false, nil
 	}, backoff.DefaultExpBackoffConfigWithContext(ctx))
+	if err != nil {
+		return cherrygo.Server{}, fmt.Errorf("server didn't reach active state: %w", err)
+	}
 
 	return srv, nil
 }
