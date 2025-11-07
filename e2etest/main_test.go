@@ -13,7 +13,7 @@ import (
 const (
 	apiTokenVar  = "CHERRY_TEST_API_TOKEN"
 	teamIDVar    = "CHERRY_TEST_TEAM_ID"
-	imagePathVar = "CCM_IMAGE_PATH"
+	imagePathVar = "CCM_IMG_PATH"
 )
 
 var cherryClient *cherrygo.Client
