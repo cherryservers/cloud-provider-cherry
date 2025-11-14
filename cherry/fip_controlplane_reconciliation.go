@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +76,7 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *res
 		return nil, nil
 	}
 
+	restCfg.ServerName = serverNameFromConfig(restCfg)
 	httpClient, err := rest.HTTPClientFor(restCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build http client from rest config: %w", err)
@@ -651,4 +654,19 @@ func (ns *nodeSet) filter(filters ...nodeFilter) *nodeSet {
 	}
 
 	return newNodeSet(nodes...)
+}
+
+func serverNameFromConfig(cfg *rest.Config) string {
+	host := cfg.Host
+
+	apiURL, err := url.Parse(host)
+	if err == nil && (apiURL.Scheme == "http" || apiURL.Scheme == "https") {
+		host = apiURL.Hostname()
+	}
+
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	return host
 }
