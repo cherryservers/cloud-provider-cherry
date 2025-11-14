@@ -513,7 +513,8 @@ func (m *controlPlaneEndpointManager) syncService(ctx context.Context, k8sServic
 	statusApplyConfig := v1applyconfig.Service(externalServiceName, externalServiceNamespace).WithStatus(
 		v1applyconfig.ServiceStatus().WithLoadBalancer(
 			v1applyconfig.LoadBalancerStatus().WithIngress(
-				v1applyconfig.LoadBalancerIngress().WithIP(fip),
+				v1applyconfig.LoadBalancerIngress().WithIP(fip).
+					WithIPMode(v1.LoadBalancerIPModeProxy),
 			),
 		),
 	)
