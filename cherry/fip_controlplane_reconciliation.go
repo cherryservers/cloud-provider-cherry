@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -63,10 +65,9 @@ type controlPlaneEndpointManager struct {
 	serviceMutex          sync.Mutex
 	endpointsMutex        sync.Mutex
 	controlPlaneSelectors []labels.Selector
-	useHostIP             bool
 }
 
-func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *rest.Config, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32, useHostIP bool) (*controlPlaneEndpointManager, error) {
+func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *rest.Config, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32) (*controlPlaneEndpointManager, error) {
 	klog.V(2).Info("newControlPlaneEndpointManager()")
 
 	if fipTag == "" {
@@ -74,6 +75,7 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *res
 		return nil, nil
 	}
 
+	restCfg.ServerName = serverNameFromConfig(restCfg)
 	httpClient, err := rest.HTTPClientFor(restCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build http client from rest config: %w", err)
@@ -96,7 +98,6 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *res
 		cherryClient:  cherryClient,
 		apiServerPort: apiServerPort,
 		k8sclient:     k8sclient,
-		useHostIP:     useHostIP,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -510,7 +511,8 @@ func (m *controlPlaneEndpointManager) syncService(ctx context.Context, k8sServic
 	statusApplyConfig := v1applyconfig.Service(externalServiceName, externalServiceNamespace).WithStatus(
 		v1applyconfig.ServiceStatus().WithLoadBalancer(
 			v1applyconfig.LoadBalancerStatus().WithIngress(
-				v1applyconfig.LoadBalancerIngress().WithIP(fip),
+				v1applyconfig.LoadBalancerIngress().WithIP(fip).
+					WithIPMode(v1.LoadBalancerIPModeProxy),
 			),
 		),
 	)
@@ -559,15 +561,6 @@ func (m *controlPlaneEndpointManager) doHealthCheck(ctx context.Context, node *v
 
 	if ok {
 		// Only perform the health check if the node is assigned the FIP
-
-		if m.useHostIP {
-			for _, a := range node.Status.Addresses {
-				// Find the non FIP external address for the node to use for the health check
-				if a.Type == v1.NodeExternalIP && a.Address != controlPlaneEndpoint.Address {
-					controlPlaneHealthURL = fmt.Sprintf("https://%s:%d/healthz", a.Address, m.nodeAPIServerPort)
-				}
-			}
-		}
 
 		klog.Infof("doHealthCheck(): checking control plane health through ip %s", controlPlaneHealthURL)
 
@@ -651,4 +644,19 @@ func (ns *nodeSet) filter(filters ...nodeFilter) *nodeSet {
 	}
 
 	return newNodeSet(nodes...)
+}
+
+func serverNameFromConfig(cfg *rest.Config) string {
+	host := cfg.Host
+
+	apiURL, err := url.Parse(host)
+	if err == nil && (apiURL.Scheme == "http" || apiURL.Scheme == "https") {
+		host = apiURL.Hostname()
+	}
+
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	return host
 }

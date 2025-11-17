@@ -179,7 +179,6 @@ This section lists each configuration option, and whether it can be set by each 
 | Tag for control plane Floating IP, in `"key=value"` format |    | `CHERRY_FIP_TAG` | `fipTag` | No control plane Floating IP |
 | Kubernetes API server port for Floating IP |     | `CHERRY_API_SERVER_PORT` | `apiServerPort` | Same as `kube-apiserver` on control plane nodes, same as `0` |
 | Filter for cluster nodes on which to enable BGP |    | `CHERRY_BGP_NODE_SELECTOR` | `bgpNodeSelector` | All nodes |
-| Use host IP for Control Plane endpoint health checks | | `CHERRY_FIP_HEALTH_CHECK_USE_HOST_IP` | `fipHealthCheckUseHostIP` | false |
 
 **Region Note:** In all cases, where a "region" is required, use the _full name_ of the region. For example,
 the region `"EU-Nord-1"` is also known by its ISO 2-character designation `"LT"`. All usages of region should
@@ -420,8 +419,6 @@ To enable CCM to manage the control plane FIP:
 1. When starting the CCM
    * set the [configuration](#Configuration) for the control plane FIP tag, e.g. env var `CHERRY_FIP_TAG=<tag>`, where `<tag>` is whatever tag you set on the FIP
    * (optional) set the port that the FIP should listen on; by default, or when set to `0`, it will use the same port as the `kube-apiserver` on the control plane nodes. This port can also be specified with `CHERRY_API_SERVER_PORT=<port>.`
-   * (optional) set the [configuration](#Configuration) for using the host IP for control plane endpoint health checks. This is
-   needed when the FIP is configured as a loopback IP address
 
 Cherry Servers does not provide an as-a-service load balancer; this means that in some way we have to check if the Floating
 IP is still assigned to an healthy control plane.
