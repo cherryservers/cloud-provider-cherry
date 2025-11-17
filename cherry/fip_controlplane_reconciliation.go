@@ -65,10 +65,9 @@ type controlPlaneEndpointManager struct {
 	serviceMutex          sync.Mutex
 	endpointsMutex        sync.Mutex
 	controlPlaneSelectors []labels.Selector
-	useHostIP             bool
 }
 
-func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *rest.Config, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32, useHostIP bool) (*controlPlaneEndpointManager, error) {
+func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *rest.Config, stop <-chan struct{}, fipTag string, projectID int, cherryClient *cherrygo.Client, apiServerPort int32) (*controlPlaneEndpointManager, error) {
 	klog.V(2).Info("newControlPlaneEndpointManager()")
 
 	if fipTag == "" {
@@ -99,7 +98,6 @@ func newControlPlaneEndpointManager(k8sclient kubernetes.Interface, restCfg *res
 		cherryClient:  cherryClient,
 		apiServerPort: apiServerPort,
 		k8sclient:     k8sclient,
-		useHostIP:     useHostIP,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -563,15 +561,6 @@ func (m *controlPlaneEndpointManager) doHealthCheck(ctx context.Context, node *v
 
 	if ok {
 		// Only perform the health check if the node is assigned the FIP
-
-		if m.useHostIP {
-			for _, a := range node.Status.Addresses {
-				// Find the non FIP external address for the node to use for the health check
-				if a.Type == v1.NodeExternalIP && a.Address != controlPlaneEndpoint.Address {
-					controlPlaneHealthURL = fmt.Sprintf("https://%s:%d/healthz", a.Address, m.nodeAPIServerPort)
-				}
-			}
-		}
 
 		klog.Infof("doHealthCheck(): checking control plane health through ip %s", controlPlaneHealthURL)
 

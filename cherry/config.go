@@ -30,20 +30,19 @@ const (
 
 // Config configuration for a provider, includes authentication token, project ID ID, and optional override URL to talk to a different Cherry Servers API endpoint
 type Config struct {
-	AuthToken               string  `json:"apiKey"`
-	ProjectID               int     `json:"projectId"`
-	BaseURL                 *string `json:"base-url,omitempty"`
-	LoadBalancerSetting     string  `json:"loadbalancer"`
-	Region                  string  `json:"region,omitempty"`
-	AnnotationLocalASN      string  `json:"annotationLocalASN,omitempty"`
-	AnnotationPeerASN       string  `json:"annotationPeerASN,omitempty"`
-	AnnotationPeerIP        string  `json:"annotationPeerIP,omitempty"`
-	AnnotationSrcIP         string  `json:"annotationSrcIP,omitempty"`
-	AnnotationFIPRegion     string  `json:"annotationFIPRegion,omitempty"`
-	FIPTag                  string  `json:"fipTag,omitempty"`
-	APIServerPort           int32   `json:"apiServerPort,omitempty"`
-	BGPNodeSelector         string  `json:"bgpNodeSelector,omitempty"`
-	FIPHealthCheckUseHostIP bool    `json:"fipHealthCheckUseHostIP,omitempty"`
+	AuthToken           string  `json:"apiKey"`
+	ProjectID           int     `json:"projectId"`
+	BaseURL             *string `json:"base-url,omitempty"`
+	LoadBalancerSetting string  `json:"loadbalancer"`
+	Region              string  `json:"region,omitempty"`
+	AnnotationLocalASN  string  `json:"annotationLocalASN,omitempty"`
+	AnnotationPeerASN   string  `json:"annotationPeerASN,omitempty"`
+	AnnotationPeerIP    string  `json:"annotationPeerIP,omitempty"`
+	AnnotationSrcIP     string  `json:"annotationSrcIP,omitempty"`
+	AnnotationFIPRegion string  `json:"annotationFIPRegion,omitempty"`
+	FIPTag              string  `json:"fipTag,omitempty"`
+	APIServerPort       int32   `json:"apiServerPort,omitempty"`
+	BGPNodeSelector     string  `json:"bgpNodeSelector,omitempty"`
 }
 
 // String converts the Config structure to a string, while masking hidden fields.
@@ -179,15 +178,6 @@ func getConfig(providerConfig io.Reader) (Config, error) {
 
 	if _, err := labels.Parse(config.BGPNodeSelector); err != nil {
 		return config, fmt.Errorf("BGP Node Selector must be valid Kubernetes selector: %w", err)
-	}
-
-	config.FIPHealthCheckUseHostIP = rawConfig.FIPHealthCheckUseHostIP
-	if v := os.Getenv(envVarFIPHealthCheckUseHostIP); v != "" {
-		useHostIP, err := strconv.ParseBool(v)
-		if err != nil {
-			return config, fmt.Errorf("env var %s must be a boolean, was %s: %w", envVarFIPHealthCheckUseHostIP, v, err)
-		}
-		config.FIPHealthCheckUseHostIP = useHostIP
 	}
 
 	return config, nil

@@ -81,7 +81,7 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 
 	// initialize the individual services
 	projectID := c.config.ProjectID
-	epm, err := newControlPlaneEndpointManager(clientset, restCfg, stop, c.config.FIPTag, projectID, c.client, c.config.APIServerPort, c.config.FIPHealthCheckUseHostIP)
+	epm, err := newControlPlaneEndpointManager(clientset, restCfg, stop, c.config.FIPTag, projectID, c.client, c.config.APIServerPort)
 	if err != nil {
 		klog.Fatalf("could not initialize ControlPlaneEndpointManager: %v", err)
 	}
