@@ -7,6 +7,9 @@ on:
     - '*'
     - '!dependabot/**'
 
+permissions:
+  contents: read
+
 env:
   IMAGE_NAME: ${{ github.repository }}
 jobs:
