@@ -7,6 +7,7 @@ type Node struct {
 	PeerASN  int
 	Password string
 	Peers    []Peer
+	Region   string
 }
 
 type Peer struct {

@@ -331,14 +331,22 @@ to route traffic for your services at the Floating IP to the correct host.
 To enable it, set the configuration `CHERRY_LOAD_BALANCER` or config `loadbalancer` to:
 
 ```
-metallb:///<metalNamespace>/
+metallb:///<metalNamespace>/?bgp-peer-mode=[frr|native|none]
 ```
+
+The difference between `native` and `frr` modes is mainly `BGPPeer` management:
+* With `native`, separate peers are created for each node.
+* With `frr`, peers are created per region and matched with nodes, based on those regions.
+* With `none`, `BGPPeer` management by the CCM is disable entirely.
+
+The default mode is `native`.
 
 For example:
 
 * `metallb:///metallb-system/` - enable `MetalLB` management and update of the CRDs in the namespace `metallb-system`
 * `metallb:///foonamespace/` -  - enable `MetalLB` management and update of the CRDs in the namespace `foonamespae`
 * `metallb:///` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`
+* `metallb:///?mode=frr` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`, with FRR mode.
 
 Notice the **three* slashes. In the URL, the namespace is in the path.
 
@@ -349,18 +357,18 @@ When enabled, CCM controls the loadbalancer by updating the CRDs.
 If `MetalLB` management is enabled, then CCM does the following.
 
 1. Get the appropriate namespace, based on the rules above.
-1. Enable BGP on the Cherry Servers project
-1. For each node currently in the cluster or added:
+2. Enable BGP on the Cherry Servers project
+3. For each node currently in the cluster or added:
    * retrieve the node's Cherry Server ID via the node provider ID
    * retrieve the device's BGP configuration: node ASN, peer ASN, peer IPs, source IP
    * add them to the metallb CRDs with a kubernetes selector ensuring that the peer is only for this node
-1. For each node deleted from the cluster:
+4. For each node deleted from the cluster:
    * remove the node from the MetalLB CRDs
-1. For each service of `type=LoadBalancer` currently in the cluster or added:
+5. For each service of `type=LoadBalancer` currently in the cluster or added:
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core) and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`
    * if a Floating IP address reservation with the appropriate tags does not exist, create it and add it to the services spec, and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`
-1. For each service of `type=LoadBalancer` deleted from the cluster:
+6. For each service of `type=LoadBalancer` deleted from the cluster:
    * find the Floating IP address from the service spec and remove it
    * remove the IP from the CRDs
    * delete the Floating IP reservation from Cherry Servers
