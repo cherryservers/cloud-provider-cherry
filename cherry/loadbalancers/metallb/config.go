@@ -43,6 +43,7 @@ type Peer struct {
 	RouterID      string         `yaml:"router-id"`
 	NodeSelectors []NodeSelector `yaml:"node-selectors"`
 	Password      string         `yaml:"password"`
+	EBGPMultiHop  bool           `yaml:"ebgp-multi-hop"`
 	Name          string         `json:"name,omitempty"`
 }
 
