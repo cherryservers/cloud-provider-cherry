@@ -484,7 +484,7 @@ func convertToBGPPeer(peer Peer, namespace, svc string) metalapi.BGPPeer {
 			NodeSelectors: convertToNodeSelectors(peer.NodeSelectors),
 			Password:      peer.Password,
 			// BFDProfile:
-			// EBGPMultiHop:
+			EBGPMultiHop: peer.EBGPMultiHop,
 		},
 	}
 	bgpPeer.SetLabels(map[string]string{cpemLabelKey: cpemLabelValue})
