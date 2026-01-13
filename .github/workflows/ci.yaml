@@ -6,6 +6,9 @@ on:
     branches:
     - '*'
     - '!dependabot/**'
+permissions:
+  contents: read
+  packages: read
 
 env:
   IMAGE_NAME: ${{ github.repository }}
@@ -68,6 +71,8 @@ jobs:
   image:
     name: Build Image
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     steps:
     - name: checkout
       uses: actions/checkout@v5

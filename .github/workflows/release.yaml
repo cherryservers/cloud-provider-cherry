@@ -3,6 +3,9 @@ on:
   push:
     tags:
     - 'v*'
+permissions:
+  contents: read
+  packages: read
 
 env:
   IMAGE_NAME: ${{ github.repository }}
@@ -11,6 +14,8 @@ jobs:
   images: # create images in docker hub
     name: Images
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     steps:
     - name: checkout
       uses: actions/checkout@v5
@@ -72,6 +77,8 @@ jobs:
   release: # create a github actions release with necessary artifacts
     name: Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
     - images
     steps:
