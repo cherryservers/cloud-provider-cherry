@@ -160,7 +160,7 @@ func getConfig(providerConfig io.Reader) (Config, error) {
 	apiServer := os.Getenv(envVarAPIServerPort)
 	switch {
 	case apiServer != "":
-		apiServerNo, err := strconv.Atoi(apiServer)
+		apiServerNo, err := strconv.ParseInt(apiServer, 10, 32)
 		if err != nil {
 			return config, fmt.Errorf("env var %s must be a number, was %s: %w", envVarAPIServerPort, apiServer, err)
 		}
