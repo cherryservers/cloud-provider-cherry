@@ -78,7 +78,18 @@ func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, p
 		impl = kubevip.NewLB(k8sclient, lbconfig)
 	case "metallb":
 		klog.Info("loadbalancer implementation enabled: metallb")
-		impl = metallb.NewLB(k8sclient, lbconfig)
+		namespace, bgpPeerMode, err := metallb.ParseConfigURL(u)
+		if err != nil {
+			return nil, fmt.Errorf("invalid metallb config: %w", err)
+		}
+
+		apiNodeSelector, err := metav1.ParseToLabelSelector(nodeSelector)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse node selector %q: %w", nodeSelector, err)
+		}
+
+		peersFromNodes := metallb.NewPeersFromNodesFunc(bgpPeerMode, *apiNodeSelector)
+		impl = metallb.NewLB(k8sclient, namespace, peersFromNodes)
 	case "empty":
 		klog.Info("loadbalancer implementation enabled: empty, bgp only")
 		impl = empty.NewLB(k8sclient, lbconfig)
@@ -204,6 +215,7 @@ func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, _ string, servic
 			LocalASN: bgpConfig.LocalASN,
 			PeerASN:  bgpConfig.RemoteASN,
 			Peers:    peers,
+			Region:   nodeRegion(node),
 		})
 	}
 	return l.implementor.UpdateService(ctx, service.Namespace, service.Name, n)
@@ -436,10 +448,22 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 			LocalASN: bgpConfig.LocalASN,
 			PeerASN:  bgpConfig.RemoteASN,
 			Peers:    peers,
+			Region:   nodeRegion(node),
 		})
 	}
 
 	return svcIPCidr, l.implementor.AddService(ctx, svc.Namespace, svc.Name, svcIPCidr, n)
+}
+
+func nodeRegion(n *v1.Node) string {
+	return nodeLabel(n, "topology.kubernetes.io/region")
+}
+
+func nodeLabel(n *v1.Node, label string) string {
+	if n == nil || n.ObjectMeta.Labels == nil {
+		return ""
+	}
+	return n.ObjectMeta.Labels[label]
 }
 
 func serviceRep(svc *v1.Service) string {

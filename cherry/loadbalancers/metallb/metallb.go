@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/cherryservers/cloud-provider-cherry/cherry/loadbalancers"
 	metalapi "go.universe.tf/metallb/api/v1beta1"
@@ -16,7 +15,6 @@ import (
 )
 
 const (
-	hostnameKey         = "kubernetes.io/hostname"
 	serviceNameKey      = "nomatch.cherryservers.com/service-name"
 	serviceNameSpaceKey = "nomatch.cherryservers.com/service-namespace"
 	defaultNamespace    = "metallb-system"
@@ -53,7 +51,8 @@ type Configurer interface {
 }
 
 type LB struct {
-	configurer Configurer
+	configurer     Configurer
+	peersFromNodes PeersFromNodesFunc
 }
 
 // NewLB returns a new LB
@@ -61,12 +60,7 @@ type LB struct {
 // We keep it around in case it is needed in the future, e.g. if we need to go back to the configmap.
 // In theory, we should be able to get the client we need of type "sigs.k8s.io/controller-runtime/pkg/client"
 // from the k8sclient; for the future.
-func NewLB(_ kubernetes.Interface, config string) *LB {
-	// may have an extra slash at the beginning or end, so get rid of it
-	config = strings.TrimPrefix(config, "/")
-	config = strings.TrimSuffix(config, "/")
-	namespace := config
-
+func NewLB(_ kubernetes.Interface, namespace string, peersFromNodes PeersFromNodesFunc) *LB {
 	// default
 	if namespace == "" {
 		namespace = defaultNamespace
@@ -80,7 +74,8 @@ func NewLB(_ kubernetes.Interface, config string) *LB {
 		panic(err)
 	}
 	return &LB{
-		configurer: &CRDConfigurer{namespace: namespace, client: cl},
+		configurer:     &CRDConfigurer{namespace: namespace, client: cl},
+		peersFromNodes: peersFromNodes,
 	}
 }
 
@@ -142,30 +137,7 @@ func (l *LB) addNodes(ctx context.Context, svcNamespace, svcName string, nodes [
 		return fmt.Errorf("unable to get metallb config: %w", err)
 	}
 
-	var (
-		changed       bool
-		peersToUpdate []Peer
-	)
-	for _, node := range nodes {
-		ns := []NodeSelector{
-			{MatchLabels: map[string]string{
-				hostnameKey: node.Name,
-			}},
-		}
-		for i, peer := range node.Peers {
-			p := Peer{
-				MyASN:         uint32(node.LocalASN),
-				ASN:           uint32(node.PeerASN),
-				Password:      node.Password,
-				Addr:          peer.Address,
-				Port:          uint16(peer.Port),
-				SrcAddr:       node.SourceIP,
-				NodeSelectors: ns,
-				Name:          fmt.Sprintf("%s-%d", node.Name, i),
-			}
-			peersToUpdate = append(peersToUpdate, p)
-		}
-	}
+	peersToUpdate := l.peersFromNodes(nodes)
 	// to ensure that the nodes are correct, we need to check the nodes specified
 	// for these services against the whole list of nodes/peers saved in the configuration
 	changed, err := config.UpdatePeersByService(ctx, &peersToUpdate, svcNamespace, svcName)
