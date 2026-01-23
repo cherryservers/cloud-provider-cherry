@@ -475,7 +475,7 @@ if [ "$NGINX1_FIP_TAG_CLUSTER" != "$CLUSTER_UID" ]; then
     exit 1
 fi
 NGINX1_FIP_TAG_SERICE=$(echo "$NGINX1_FIP_JSON" | jq -r '.tags.service')
-NGINX1_EXPECTED_SERVICE_TAG=$(print 'default/nginx-1' | sha256sum | awk '{print $1}' | xxd -r -p | base64)
+NGINX1_EXPECTED_SERVICE_TAG=$(printf 'default/nginx-1' | sha256sum | awk '{print $1}' | xxd -r -p | base64)
 if [ "$NGINX1_FIP_TAG_SERICE" != "$NGINX1_EXPECTED_SERVICE_TAG" ]; then
     echo "nginx-1 service floating IP does not have correct service tag, got $NGINX1_FIP_TAG_SERICE, expected $NGINX1_EXPECTED_SERVICE_TAG"
     exit 1
@@ -531,7 +531,7 @@ if [ "$NGINX2_FIP_TAG_CLUSTER" != "$CLUSTER_UID" ]; then
     exit 1
 fi
 NGINX2_FIP_TAG_SERVICE=$(echo "$NGINX2_FIP_JSON" | jq -r '.tags.service')
-NGINX2_EXPECTED_SERVICE_TAG=$(print 'default/nginx-2' | sha256sum | awk '{print $1}' | xxd -r -p | base64)
+NGINX2_EXPECTED_SERVICE_TAG=$(printf 'default/nginx-2' | sha256sum | awk '{print $1}' | xxd -r -p | base64)
 if [ "$NGINX2_FIP_TAG_SERVICE" != "$NGINX2_EXPECTED_SERVICE_TAG" ]; then
     echo "nginx-2 service floating IP does not have correct service tag, got $NGINX2_FIP_TAG_SERVICE, expected $NGINX2_EXPECTED_SERVICE_TAG"
     exit 1
