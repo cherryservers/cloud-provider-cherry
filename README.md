@@ -203,9 +203,28 @@ When a load balancer is enabled, the CCM does the following:
 1. Enable BGP for the project
 1. Enable BGP on each node as it comes up
 1. For each `Service` of `type=LoadBalancer`:
-   * If you have specified a load balancer IP on `Service.Spec.LoadBalancerIP` (bring your own IP, or BYOIP), do nothing
-   * If you have not specified a load balancer IP on `Service.Spec.LoadBalancerIP`, get a Cherry Servers Floating IP and set it on `Service.Spec.LoadBalancerIP`, see below
+   * If you hace specified the annotation `cherryservers.com/loadbalancer-managed: "false"`, skip it entirely (see [Opting Out of CCM Management](#opting-out-of-ccm-management))
+   * If you have specified a load balancer IP on `Service.Spec.LoadBalancerIP` (bring your own IP, or BYOIP), do nothing. The CCM also checks implementor-specific sources (e.g., the `metallb.universe.tf/loadBalancerIPs` annotation for MetalLB).
+   * If you have not specified a load balancer IP on `Service.Spec.LoadBalancerIP` (or via implementor-specific annotations), get a Cherry Servers Floating IP and set it on `Service.Spec.LoadBalancerIP`, see below
 1. Pass control to the specific load balancer implementation
+
+#### Opting Out of CCM Management
+
+If you have services of `type=LoadBalancer` that are already managed externally (e.g., you have your own MetalLB `IPAddressPool` and BGP configuration), you can tell the CCM to skip them entirely by adding the following annotation:
+
+```yaml
+  annotations:
+    cherryservers.com/loadbalancer-managed: "false"
+```
+
+When this annotation is set to `"false"`, the CCM will not:
+
+* Create or manage a Floating IP reservation
+* Create or manage an `IPAddressPool`
+* Set or modify `Service.Spec.LoadBalancerIP`
+* Enable BGP or annotate nodes for this service
+
+This is useful when you manage your own MetalLB address pools and BGP peers for certain services, and want to prevent the CCM from interfering with those services.
 
 #### Service Load Balancer IP
 
@@ -240,6 +259,8 @@ spec:
 ```
 
 CCM will detect that `loadBalancerIP` already was set and not try to create a new Cherry Servers Floating IP.
+
+**Note:** Since `Service.Spec.LoadBalancerIP` is deprecated, the CCM also checks implementor-specific sources. For MetalLB, it checks the `metallb.universe.tf/loadBalancerIPs` annotation. If this annotation is set, the CCM treats the service as already having an IP assigned and will not create a new Floating IP.
 
 ##### Cherry Servers FIP
 
@@ -365,6 +386,7 @@ If `MetalLB` management is enabled, then CCM does the following.
 4. For each node deleted from the cluster:
    * remove the node from the MetalLB CRDs
 5. For each service of `type=LoadBalancer` currently in the cluster or added:
+   * if the service has the annotation `cherryservers.com/loadbalancer-managed: "false"`, skip it entirely
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core) and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`
    * if a Floating IP address reservation with the appropriate tags does not exist, create it and add it to the services spec, and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`

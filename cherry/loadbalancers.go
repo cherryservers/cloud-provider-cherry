@@ -104,6 +104,17 @@ func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, p
 	return l, nil
 }
 
+// isServiceManaged returns true if the service should be managed by this controller.
+// A service is considered unmanaged if it has the annotation
+// cherryservers.com/loadbalancer-managed set to "false".
+func isServiceManaged(svc *v1.Service) bool {
+	if svc == nil {
+		return true
+	}
+	val := serviceAnnotation(svc, AnnotationLoadBalancerManaged)
+	return val != "false"
+}
+
 // implementation of cloudprovider.LoadBalancer
 
 // GetLoadBalancer returns whether the specified load balancer exists, and
@@ -111,6 +122,10 @@ func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, p
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadBalancers) GetLoadBalancer(_ context.Context, _ string, service *v1.Service) (status *v1.LoadBalancerStatus, exists bool, err error) {
+	if !isServiceManaged(service) {
+		klog.V(2).Infof("GetLoadBalancer(): service %s/%s is not managed by this controller", service.Namespace, service.Name)
+		return nil, false, nil
+	}
 	svcName := serviceRep(service)
 	svcTag, svcValue := serviceTag(service)
 	clsTag, clsValue := clusterTag(l.clusterID)
@@ -159,6 +174,10 @@ func (l *loadBalancers) GetLoadBalancerName(_ context.Context, _ string, service
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, _ string, service *v1.Service, nodes []*v1.Node) (*v1.LoadBalancerStatus, error) {
+	if !isServiceManaged(service) {
+		klog.V(2).Infof("EnsureLoadBalancer(): service %s/%s is not managed by this controller, skipping", service.Namespace, service.Name)
+		return nil, nil
+	}
 	klog.V(2).Infof("EnsureLoadBalancer(): add: service %s/%s", service.Namespace, service.Name)
 	// get IP address reservations and check if they any exists for this svc
 	ips, _, err := l.client.IPAddresses.List(l.project, nil)
@@ -184,6 +203,10 @@ func (l *loadBalancers) EnsureLoadBalancer(ctx context.Context, _ string, servic
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, _ string, service *v1.Service, nodes []*v1.Node) error {
+	if !isServiceManaged(service) {
+		klog.V(2).Infof("UpdateLoadBalancer(): service %s/%s is not managed by this controller, skipping", service.Namespace, service.Name)
+		return nil
+	}
 	klog.V(2).Infof("UpdateLoadBalancer(): service %s", service.Name)
 	// get IP address reservations and check if they any exists for this svc
 
@@ -230,6 +253,10 @@ func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, _ string, servic
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, _ string, service *v1.Service) error {
+	if !isServiceManaged(service) {
+		klog.V(2).Infof("EnsureLoadBalancerDeleted(): service %s/%s is not managed by this controller, skipping", service.Namespace, service.Name)
+		return nil
+	}
 	// REMOVAL
 	klog.V(2).Infof("EnsureLoadBalancerDeleted(): remove: %s", service.Name)
 	svcName := serviceRep(service)
