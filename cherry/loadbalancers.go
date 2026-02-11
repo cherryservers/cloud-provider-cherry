@@ -105,8 +105,6 @@ func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, p
 }
 
 // isServiceManaged returns true if the service should be managed by this controller.
-// A service is considered unmanaged if it has the annotation
-// cherryservers.com/loadbalancer-managed set to "false".
 func isServiceManaged(svc *v1.Service) bool {
 	if svc == nil {
 		return true
