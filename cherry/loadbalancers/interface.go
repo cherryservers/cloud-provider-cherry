@@ -2,6 +2,8 @@ package loadbalancers
 
 import (
 	"context"
+
+	v1 "k8s.io/api/core/v1"
 )
 
 type LB interface {
@@ -11,4 +13,6 @@ type LB interface {
 	RemoveService(ctx context.Context, svcNamespace, svcName, ip string) error
 	// UpdateService ensure that the nodes handled by the service are correct
 	UpdateService(ctx context.Context, svcNamespace, svcName string, nodes []Node) error
+	// ServiceIP returns the effective load balancer IP for a service,
+	ServiceIP(svc *v1.Service) string
 }

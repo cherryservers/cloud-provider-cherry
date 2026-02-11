@@ -343,7 +343,7 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 	svcTag, svcValue := serviceTag(svc)
 	svcRegion := serviceAnnotation(svc, l.fipRegionAnnotation)
 	clsTag, clsValue := clusterTag(l.clusterID)
-	svcIP := svc.Spec.LoadBalancerIP
+	svcIP := l.implementor.ServiceIP(svc)
 
 	var (
 		svcIPCidr string

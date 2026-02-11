@@ -7,6 +7,7 @@ import (
 
 	"github.com/cherryservers/cloud-provider-cherry/cherry/loadbalancers"
 	metalapi "go.universe.tf/metallb/api/v1beta1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -15,9 +16,10 @@ import (
 )
 
 const (
-	serviceNameKey      = "nomatch.cherryservers.com/service-name"
-	serviceNameSpaceKey = "nomatch.cherryservers.com/service-namespace"
-	defaultNamespace    = "metallb-system"
+	serviceNameKey                   = "nomatch.cherryservers.com/service-name"
+	serviceNameSpaceKey              = "nomatch.cherryservers.com/service-namespace"
+	defaultNamespace                 = "metallb-system"
+	metallbLoadBalancerIPsAnnotation = "metallb.universe.tf/loadBalancerIPs"
 )
 
 type Configurer interface {
@@ -77,6 +79,17 @@ func NewLB(_ kubernetes.Interface, namespace string, peersFromNodes PeersFromNod
 		configurer:     &CRDConfigurer{namespace: namespace, client: cl},
 		peersFromNodes: peersFromNodes,
 	}
+}
+
+// ServiceIP returns the effective load balancer IP for a service.
+func (l *LB) ServiceIP(svc *v1.Service) string {
+	if svc == nil {
+		return ""
+	}
+	if ip, ok := svc.Annotations[metallbLoadBalancerIPsAnnotation]; ok && ip != "" {
+		return ip
+	}
+	return svc.Spec.LoadBalancerIP
 }
 
 func (l *LB) AddService(ctx context.Context, svcNamespace, svcName, ip string, nodes []loadbalancers.Node) error {
