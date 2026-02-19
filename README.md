@@ -346,7 +346,7 @@ For example:
 * `metallb:///metallb-system/` - enable `MetalLB` management and update of the CRDs in the namespace `metallb-system`
 * `metallb:///foonamespace/` -  - enable `MetalLB` management and update of the CRDs in the namespace `foonamespae`
 * `metallb:///` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`
-* `metallb:///?mode=frr` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`, with FRR mode.
+* `metallb:///?bgp-peer-mode=frr` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`, with FRR mode.
 
 Notice the **three* slashes. In the URL, the namespace is in the path.
 
