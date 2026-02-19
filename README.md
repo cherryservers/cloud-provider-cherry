@@ -200,12 +200,24 @@ Cherry Servers CCM will interface with and configure external bare-metal loadbal
 
 When a load balancer is enabled, the CCM does the following:
 
-1. Enable BGP for the project
-1. Enable BGP on each node as it comes up
-1. For each `Service` of `type=LoadBalancer`:
-   * If you have specified a load balancer IP on `Service.Spec.LoadBalancerIP` (bring your own IP, or BYOIP), do nothing
-   * If you have not specified a load balancer IP on `Service.Spec.LoadBalancerIP`, get a Cherry Servers Floating IP and set it on `Service.Spec.LoadBalancerIP`, see below
-1. Pass control to the specific load balancer implementation
+1. Enable BGP for the project.
+2. For each `Service` of `type=LoadBalancer` that is not [managed externally](#opting-out-of-ccm-management):
+   * If there's no `Service.Spec.LoadBalancerIP` set (bring your own IP, or [BYOIP](#bring-your-own-ip)), get a Cherry Servers Floating IP and set it.
+   * Ensure BGP is enabled on all participating nodes.
+   * Pass control to the specific load balancer implementation.
+
+#### Opting Out of CCM Management
+
+If you have services of `type=LoadBalancer` that are already managed externally (e.g., you have your own MetalLB `IPAddressPool` and BGP configuration), you can tell the CCM to skip them entirely by adding the following annotation:
+
+```yaml
+  annotations:
+    cherryservers.com/loadbalancer-managed: "false"
+```
+
+This is useful when want to prevent the CCM from interfering with certain services.
+
+This annotation should NOT be changed after the service is created, as that can result in invalid implementor configurations or prevent proper teardown.
 
 #### Service Load Balancer IP
 
@@ -291,8 +303,7 @@ API calls to support a load balancer, and providing configuration for supported 
 
 ##### kube-vip
 
-When the [kube-vip](https://kube-vip.io) option is enabled, for user-deployed Kubernetes `Service` of `type=LoadBalancer`,
-the Cherry Servers CCM enables BGP on the project and nodes, assigns a FIP for each such
+When the [kube-vip](https://kube-vip.io) option is enabled, the Cherry Servers CCM enables BGP for the project and, for user-deployed Kubernetes `Service`s of `type=LoadBalancer`, that are not [managed externally](#opting-out-of-ccm-management), assigns a FIP for each such
 `Service`, and adds annotations to the nodes. These annotations are configured to be consumable
 by kube-vip.
 
@@ -302,20 +313,19 @@ To enable it, set the configuration `CHERRY_LOAD_BALANCER` or config `loadbalanc
 kube-vip://
 ```
 
-Directions on using configuring kube-vip in this method are available at the kube-vip [site](https://kube-vip.io/docs/)
+Directions on configuring kube-vip in this method are available at the kube-vip [site](https://kube-vip.io/docs/).
 
-If `kube-vip` management is enabled, then CCM does the following.
+If `kube-vip` is enabled, then for services of `type=LoadBalancer`, that are not [managed externally](#opting-out-of-ccm-management), the CCM does the following.
 
-1. Enable BGP on the Cherry Servers project
 1. For each node currently in the cluster or added:
    * retrieve the node's Cherry Servers ID via the node provider ID
    * retrieve the device's BGP configuration: node ASN, peer ASN, peer IPs, source IP
    * add the information to appropriate annotations on the node
-1. For each service of `type=LoadBalancer` currently in the cluster or added:
+1. For each such service currently in the cluster or added:
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core)
    * if a Floating IP address reservation with the appropriate tags does not exist, create it and add it to the services spec
-1. For each service of `type=LoadBalancer` deleted from the cluster:
+1. For each such service deleted from the cluster:
    * find the Floating IP address from the service spec and remove it
    * delete the Floating IP reservation from Cherry Servers
 
@@ -354,21 +364,20 @@ Notice the **three* slashes. In the URL, the namespace is in the path.
 
 When enabled, CCM controls the loadbalancer by updating the CRDs.
 
-If `MetalLB` management is enabled, then CCM does the following.
+If `MetalLB` is enabled, the CCM enables BGP for the project and, for services of `type=LoadBalancer`, that are not [managed externally](#opting-out-of-ccm-management), does the following.
 
 1. Get the appropriate namespace, based on the rules above.
-2. Enable BGP on the Cherry Servers project
-3. For each node currently in the cluster or added:
+2. For each node currently in the cluster or added:
    * retrieve the node's Cherry Server ID via the node provider ID
    * retrieve the device's BGP configuration: node ASN, peer ASN, peer IPs, source IP
    * add them to the MetalLB CRDs, based on `bgp-peer-mode`, as described above
-4. For each node deleted from the cluster:
+3. For each node deleted from the cluster:
    * remove the node from the MetalLB CRDs, based on `bgp-peer-mode`, as described above
-5. For each service of `type=LoadBalancer` currently in the cluster or added:
+4. For each such service currently in the cluster or added:
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core) and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`
    * if a Floating IP address reservation with the appropriate tags does not exist, create it and add it to the services spec, and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`
-6. For each service of `type=LoadBalancer` deleted from the cluster:
+5. For each such service deleted from the cluster:
    * find the Floating IP address from the service spec and remove it
    * remove the IP from the CRDs
    * delete the Floating IP reservation from Cherry Servers
@@ -378,8 +387,7 @@ administrator separately, using the manifest provided in the releases page, or i
 
 ##### empty
 
-When the `empty` option is enabled, for user-deployed Kubernetes `Service` of `type=LoadBalancer`,
-the Cherry Servers CCM enables BGP on the project and nodes, assigns a FIP for each such
+When the `empty` option is enabled, the Cherry Servers CCM enables BGP for the project and, for user-deployed Kubernetes `Service`s of `type=LoadBalancer`, that are not [managed externally](#opting-out-of-ccm-management), assigns a FIP for each such
 `Service`, and adds annotations to the nodes. It does not integrate directly with any load balancer.
 This is useful if you have your own implementation, but want to leverage Cherry Servers CCM's
 management of BGP and FIPs.
@@ -390,18 +398,17 @@ To enable it, set the configuration `CHERRY_LOAD_BALANCER` or config `loadbalanc
 empty://
 ```
 
-If `empty` management is enabled, then CCM does the following.
+If `empty` is enabled, the CCM enables BGP for the project and, for services of `type=LoadBalancer`, that are not [managed externally](#opting-out-of-ccm-management), does the following.
 
-1. Enable BGP on the Cherry Servers project
 1. For each node currently in the cluster or added:
    * retrieve the node's Cherry Servers ID via the node provider ID
    * retrieve the device's BGP configuration: node ASN, peer ASN, peer IPs, source IP
    * add the information to appropriate annotations on the node
-1. For each service of `type=LoadBalancer` currently in the cluster or added:
+1. For each such service currently in the cluster or added:
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core)
    * if a Floating IP address reservation with the appropriate tags does not exist, create it and add it to the services spec
-1. For each service of `type=LoadBalancer` deleted from the cluster:
+1. For each such service deleted from the cluster:
    * find the Floating IP address from the service spec and remove it
    * delete the Floating IP reservation from Cherry Servers
 
