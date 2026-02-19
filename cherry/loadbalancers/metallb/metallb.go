@@ -2,11 +2,13 @@ package metallb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 
 	"github.com/cherryservers/cloud-provider-cherry/cherry/loadbalancers"
 	metalapi "go.universe.tf/metallb/api/v1beta1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -18,6 +20,9 @@ const (
 	serviceNameKey      = "nomatch.cherryservers.com/service-name"
 	serviceNameSpaceKey = "nomatch.cherryservers.com/service-namespace"
 	defaultNamespace    = "metallb-system"
+	// Deprecated in v0.14.9.
+	oldLoadBalancerIPsAnnotation = "metallb.universe.tf/loadBalancerIPs"
+	loadBalancerIPsAnnotation    = "metallb.io/loadBalancerIPs"
 )
 
 type Configurer interface {
@@ -77,6 +82,47 @@ func NewLB(_ kubernetes.Interface, namespace string, peersFromNodes PeersFromNod
 		configurer:     &CRDConfigurer{namespace: namespace, client: cl},
 		peersFromNodes: peersFromNodes,
 	}
+}
+
+// ServiceIP returns the load balancer IP for the Service.
+// The boolean result reports whether an IP was found.
+//
+// The IP is determined as follows:
+//  1. If the "metallb.io/loadBalancerIPs" annotation is set and non-empty, it is used.
+//  2. Otherwise, if the "metallb.universe.tf/loadBalancerIPs" annotation is set and non-empty, it is used.
+//  3. Otherwise, if svc.Spec.LoadBalancerIP is set, it is used.
+func (l *LB) ServiceIP(svc *v1.Service) (string, bool) {
+	if svc == nil {
+		return "", false
+	}
+
+	if ip := svc.Annotations[loadBalancerIPsAnnotation]; ip != "" {
+		return ip, true
+	}
+
+	if ip := svc.Annotations[oldLoadBalancerIPsAnnotation]; ip != "" {
+		return ip, true
+	}
+
+	if ip := svc.Spec.LoadBalancerIP; ip != "" {
+		return ip, true
+	}
+
+	return "", false
+}
+
+// SetServiceIP sets a service's load balancer IP annotation "metallb.io/loadBalancerIPs".
+func (l *LB) SetServiceIP(svc *v1.Service, ip string) error {
+	if svc == nil {
+		return errors.New("failed to set ip, service is nil")
+	}
+
+	if svc.Annotations == nil {
+		svc.Annotations = make(map[string]string)
+	}
+
+	svc.Annotations[loadBalancerIPsAnnotation] = ip
+	return nil
 }
 
 func (l *LB) AddService(ctx context.Context, svcNamespace, svcName, ip string, nodes []loadbalancers.Node) error {
