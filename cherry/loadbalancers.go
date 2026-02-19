@@ -93,7 +93,9 @@ func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, p
 		impl = metallb.NewLB(k8sclient, namespace, peersFromNodes)
 	case "empty":
 		klog.Info("loadbalancer implementation enabled: empty, bgp only")
-		impl = empty.NewLB(k8sclient, lbconfig)
+		ipAnnotation := u.Query().Get("ip-annotation")
+		klog.Infof("ip-annotation: %s", ipAnnotation)
+		impl = empty.NewLB(k8sclient, ipAnnotation)
 	default:
 		klog.Info("loadbalancer implementation disabled")
 		impl = nil
@@ -125,7 +127,7 @@ func (l *loadBalancers) GetLoadBalancer(_ context.Context, _ string, service *v1
 	svcName := serviceRep(service)
 	svcTag, svcValue := serviceTag(service)
 	clsTag, clsValue := clusterTag(l.clusterID)
-	svcIP := service.Spec.LoadBalancerIP
+	svcIP, _ := l.implementor.ServiceIP(service)
 
 	var svcIPCidr string
 
@@ -258,7 +260,7 @@ func (l *loadBalancers) EnsureLoadBalancerDeleted(ctx context.Context, _ string,
 	svcName := serviceRep(service)
 	svcTag, svcValue := serviceTag(service)
 	clsTag, clsValue := clusterTag(l.clusterID)
-	svcIP := service.Spec.LoadBalancerIP
+	svcIP, _ := l.implementor.ServiceIP(service)
 
 	var svcIPCidr string
 
@@ -366,7 +368,7 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 	svcTag, svcValue := serviceTag(svc)
 	svcRegion := serviceAnnotation(svc, l.fipRegionAnnotation)
 	clsTag, clsValue := clusterTag(l.clusterID)
-	svcIP := svc.Spec.LoadBalancerIP
+	svcIP, hasIP := l.implementor.ServiceIP(svc)
 
 	var (
 		svcIPCidr string
@@ -375,7 +377,7 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 
 	klog.V(2).Infof("processing %s with existing IP assignment %s", svcName, svcIP)
 	// if it already has an IP, no need to get it one
-	if svcIP == "" {
+	if !hasIP {
 		klog.V(2).Infof("no IP assigned for service %s; searching reservations", svcName)
 
 		// if no IP found, request a new one
@@ -421,7 +423,10 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 			klog.V(2).Infof("failed to get latest for service %s: %v", svcName, err)
 			return "", fmt.Errorf("failed to get latest for service %s: %w", svcName, err)
 		}
-		existing.Spec.LoadBalancerIP = svcIP
+		err = l.implementor.SetServiceIP(existing, svcIP)
+		if err != nil {
+			return "", fmt.Errorf("failed to set service IP: %w", err)
+		}
 
 		_, err = intf.Update(ctx, existing, metav1.UpdateOptions{})
 		if err != nil {
