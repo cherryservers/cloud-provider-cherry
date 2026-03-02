@@ -346,7 +346,7 @@ For example:
 * `metallb:///metallb-system/` - enable `MetalLB` management and update of the CRDs in the namespace `metallb-system`
 * `metallb:///foonamespace/` -  - enable `MetalLB` management and update of the CRDs in the namespace `foonamespae`
 * `metallb:///` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`
-* `metallb:///?mode=frr` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`, with FRR mode.
+* `metallb:///?bgp-peer-mode=frr` - enable `MetalLB` management and update of the CRDs in the default namespace, i.e. `metallb-system`, with FRR mode.
 
 Notice the **three* slashes. In the URL, the namespace is in the path.
 
@@ -361,9 +361,9 @@ If `MetalLB` management is enabled, then CCM does the following.
 3. For each node currently in the cluster or added:
    * retrieve the node's Cherry Server ID via the node provider ID
    * retrieve the device's BGP configuration: node ASN, peer ASN, peer IPs, source IP
-   * add them to the metallb CRDs with a kubernetes selector ensuring that the peer is only for this node
+   * add them to the MetalLB CRDs, based on `bgp-peer-mode`, as described above
 4. For each node deleted from the cluster:
-   * remove the node from the MetalLB CRDs
+   * remove the node from the MetalLB CRDs, based on `bgp-peer-mode`, as described above
 5. For each service of `type=LoadBalancer` currently in the cluster or added:
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` already has that IP address affiliated with it, it is ready; ignore
    * if a Floating IP address reservation with the appropriate tags exists, and the `Service` does not have that IP affiliated with it, add it to the [service spec](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#servicespec-v1-core) and ensure it is in the pools of the MetalLB CRDs with `auto-assign: false`
