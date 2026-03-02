@@ -15,6 +15,7 @@ type BGPPeer struct {
 	Port    int
 }
 type NodeBGPInfo struct {
+	SourceIP  string
 	LocalASN  int
 	RemoteASN int
 	Peers     []BGPPeer
@@ -83,14 +84,12 @@ func (b *bgp) ensureNodeBGPEnabled(providerID string) (NodeBGPInfo, error) {
 	if err != nil {
 		return NodeBGPInfo{}, fmt.Errorf("error getting server %d: %v", id, err)
 	}
-	// already configured? just return nil
+
+	// Server update requests don't return IP address fields, so save the IPs.
+	ips := server.IPAddresses
+
 	if server.BGP.Enabled {
-		// get the BGP info on the server
-		var peers []BGPPeer
-		for _, p := range server.Region.BGP.Hosts {
-			peers = append(peers, BGPPeer{Address: p, Port: PeerPort})
-		}
-		return NodeBGPInfo{LocalASN: b.localASN, RemoteASN: server.Region.BGP.Asn, Peers: peers}, nil
+		return b.nodeBGPInfoFromServer(server)
 	}
 
 	// enable it
@@ -101,10 +100,31 @@ func (b *bgp) ensureNodeBGPEnabled(providerID string) (NodeBGPInfo, error) {
 	if err != nil {
 		return NodeBGPInfo{}, err
 	}
-	// get the BGP info on the server
-	var peers []BGPPeer
-	for _, p := range server.Region.BGP.Hosts {
-		peers = append(peers, BGPPeer{Address: p, Port: PeerPort})
+
+	server.IPAddresses = ips
+	return b.nodeBGPInfoFromServer(server)
+}
+
+func (b *bgp) nodeBGPInfoFromServer(s cherrygo.Server) (NodeBGPInfo, error) {
+	ips, err := ipsFromServer(s)
+	if err != nil {
+		// Might not have failed to parse every IP, so just log and try to continue.
+		klog.V(2).Infof("failed to parse server %d ips: %v", s.ID, err)
 	}
-	return NodeBGPInfo{LocalASN: b.localASN, RemoteASN: server.Region.BGP.Asn, Peers: peers}, nil
+
+	sourceIP, err := ips.anyPublic4()
+	if err != nil {
+		return NodeBGPInfo{}, fmt.Errorf("no public IP for server %d: %w", s.ID, err)
+	}
+
+	var peers []BGPPeer
+	for _, a := range s.Region.BGP.Hosts {
+		peers = append(peers, BGPPeer{Address: a, Port: PeerPort})
+	}
+
+	return NodeBGPInfo{
+		LocalASN:  b.localASN,
+		RemoteASN: s.Region.BGP.Asn,
+		Peers:     peers,
+		SourceIP:  sourceIP.String()}, nil
 }
