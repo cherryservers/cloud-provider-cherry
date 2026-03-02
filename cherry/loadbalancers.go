@@ -237,6 +237,7 @@ func (l *loadBalancers) UpdateLoadBalancer(ctx context.Context, _ string, servic
 			PeerASN:  bgpConfig.RemoteASN,
 			Peers:    peers,
 			Region:   nodeRegion(node),
+			SourceIP: bgpConfig.SourceIP,
 		})
 	}
 	return l.implementor.UpdateService(ctx, service.Namespace, service.Name, n)
@@ -477,6 +478,7 @@ func (l *loadBalancers) addService(ctx context.Context, svc *v1.Service, ips []c
 			PeerASN:  bgpConfig.RemoteASN,
 			Peers:    peers,
 			Region:   nodeRegion(node),
+			SourceIP: bgpConfig.SourceIP,
 		})
 	}
 
