@@ -336,10 +336,12 @@ func (l *loadBalancers) annotateNode(ctx context.Context, node *v1.Node) error {
 			annotationLocalASN := strings.Replace(l.annotationLocalASN, "{{n}}", strconv.Itoa(i), 1)
 			annotationPeerASN := strings.Replace(l.annotationPeerASN, "{{n}}", strconv.Itoa(i), 1)
 			annotationPeerIP := strings.Replace(l.annotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
+			annotationSrcIP := strings.Replace(l.annotationSrcIP, "{{n}}", strconv.Itoa(i), 1)
 
 			annotations[annotationLocalASN] = localASN
 			annotations[annotationPeerASN] = peerASN
 			annotations[annotationPeerIP] = peer.Address
+			annotations[annotationSrcIP] = bgpConfig.SourceIP
 		}
 	}
 
