@@ -92,33 +92,36 @@ func (i *instances) InstanceMetadata(_ context.Context, node *v1.Node) (*cloudpr
 }
 
 func nodeAddresses(server cherrygo.Server) ([]v1.NodeAddress, error) {
-	var addresses []v1.NodeAddress
-	addresses = append(addresses, v1.NodeAddress{Type: v1.NodeHostName, Address: server.Hostname})
-
-	var privateIP, publicIP string
-	for _, address := range server.IPAddresses {
-		if address.AddressFamily == 4 {
-			var addrType v1.NodeAddressType
-			switch address.Type {
-			case "private-ip":
-				privateIP = address.Address
-				addrType = v1.NodeInternalIP
-			case "primary-ip", "public-ip":
-				publicIP = address.Address
-				addrType = v1.NodeExternalIP
-			}
-			addresses = append(addresses, v1.NodeAddress{Type: addrType, Address: address.Address})
-		}
+	ips, err := ipsFromServer(server)
+	if err != nil {
+		// Might not have failed to parse every IP, so just log and try to continue.
+		klog.V(2).Infof("failed to parse server %d ips: %v", server.ID, err)
 	}
 
-	if privateIP == "" {
+	pub, pri := ips.allPublic4(), ips.allPrivate4()
+
+	if len(pri) < 1 {
 		return nil, errors.New("could not get at least one private ip")
 	}
 
-	if publicIP == "" {
+	if len(pub) < 1 {
 		return nil, errors.New("could not get at least one public ip")
 	}
 
+	addresses := make([]v1.NodeAddress, 0, len(pub)+len(pri)+1)
+	addresses = append(addresses,
+		v1.NodeAddress{Type: v1.NodeHostName, Address: server.Hostname})
+
+	for _, ip := range pub {
+		addresses = append(addresses,
+			v1.NodeAddress{Type: v1.NodeExternalIP, Address: ip.String()})
+	}
+
+	for _, ip := range pri {
+		addresses = append(addresses,
+			v1.NodeAddress{Type: v1.NodeInternalIP, Address: ip.String()})
+
+	}
 	return addresses, nil
 }
 
