@@ -205,6 +205,10 @@ This branch is used for all patches to that `major.minor` version.
 
 When a new patch is required for a `vX.Y` branch, apply the fix to the HEAD of the specific branch.
 
+To simplify back-porting to version branches, use `backport vX.Y` labels.
+Then, if the original pull request is merged, pull requests to `vX.Y` branches,
+with cherry-picked commits, will be automatically opened.
+
 ### Cutting a Release
 
 To cut a release, tag a commit on the branch. The tag should be of the form `vX.Y.Z`,
