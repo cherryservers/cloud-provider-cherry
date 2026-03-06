@@ -18,7 +18,7 @@ jobs:
       packages: write
     steps:
     - name: checkout
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
     - name: Set up QEMU for cross-building
       uses: docker/setup-qemu-action@v3
     - name: Set up Docker Buildx
@@ -83,7 +83,7 @@ jobs:
     - images
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
     - name: Build image urls
       id: image-urls
       env:
