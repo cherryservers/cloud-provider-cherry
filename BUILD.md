@@ -168,21 +168,21 @@ The Cherry Servers CCM is similar to the standard Kubernetes versioning and bran
 
 * `main` is the main branch, and is the current development branch.
 * `vX.Y` is the release branch for a particular Kubernetes `major.minor` version, e.g. `v1.27`. This branch is created when the first work is done for a particular Kubernetes `major.minor` release, and is updated with any patches for that `major.minor` stream.
-
-`main` generally will be up to date with the most recent `vX.Y` branch, and will be the basis for the next `vX.Y+1` branch.
+* `main` and all version branches are protected from direct modification and only accept changes via pull requests.
 
 ### Creating a new version
 
 When a new Kubernetes `major.minor` version is released, create a new `vX.Y` branch from `main`.
 This branch is used for all patches to that `major.minor` version.
 
-### Patching a version
+### Working on existing branches
 
-When a new patch is required for a `vX.Y` branch, apply the fix to the HEAD of the specific branch.
+For changes that are specific to version `vX.Y`, e.g. bumping Kubernetes libraries, create a pull request to that branch.
 
-To simplify back-porting to version branches, use `backport vX.Y` labels.
-Then, if the original pull request is merged, pull requests to `vX.Y` branches,
-with cherry-picked commits, will be automatically opened.
+For non-branch-specific updates, create pull requests to `main`. If these updates need to propagate to
+version branches, use `backport vX.Y` labels - CI will then automatically create pull requests to those
+branches with cherry picked commits. If that fails due to conflicts, cherry pick the needed commits
+by hand and resolve as needed.
 
 ### Cutting a Release
 
