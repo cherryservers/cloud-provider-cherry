@@ -77,31 +77,6 @@ CHERRY_REGION_NAME=${CHERRY_REGION_NAME} CHERRY_LOAD_BALANCER=${CHERRY_LOAD_BALA
 CHERRY_REGION_NAME=${CHERRY_REGION_NAME} CHERRY_LOAD_BALANCER=metallb:// dist/bin/cloud-provider-cherry-darwin-amd64 --cloud-provider=cherryservers --leader-elect=false --authentication-skip-lookup=true --cloud-config=$CCM_SECRET --kubeconfig=$KUBECONFIG
 ```
 
-## CI/CD/Release pipeline
-
-The CI/CD/Release pipeline is run via the following steps:
-
-* `make ci`: builds the binary, runs all tests, builds the OCI image
-* `make cd`: takes the image from the prior stage, tags it with the name of the branch and git hash from the commit, and pushes to the docker registry
-* `make release`: takes the image from the `ci` stage, tags it with the git tag, and pushes to the docker registry
-
-The assumptions about workflow are as follows:
-
-* `make ci` can be run anywhere. The built binaries and OCI image will be named and tagged as per `make build` and `make image` above.
-* `make cd` should be run only on a merge into `main`. It generally will be run only in a CI system, e.g. [drone](https://drone.io) or [github actions](https://github.com/features/actions). It requires passing both `CONFIRM=true` to tell it that it is ok to push, and `BRANCH_NAME=${BRANCH_NAME}` to tell it what tag should be used in addition to the git hash. For example, to push out the current commit as main: `make cd CONFIRM=true BRANCH_NAME=main`
-* `make release` should be run only on applying a tag to `main`, although it can run elsewhere. It generally will be run only in a CI system. It requires passing both `CONFIRM=true` to tell it that it is ok to push, and `RELEASE_TAG=${RELEASE_TAG}` to tell it what tag this release should be. For example, to push out a tagged version `v1.2.3` on the current commit: `make release CONFIRM=true RELEASE_TAG=v1.2.3`.
-
-For both `make cd` and `make release`, if you wish to push out a _different_ commit, then check that one out first.
-
-The flow to make changes normally should be:
-
-1. `main` is untouched, a protected branch.
-2. In your local copy, create a new working branch.
-3. Make your changes in your working branch, commit and push.
-4. Open a Pull Request or Merge Request from the branch to `main`. This will cause `make ci` to run.
-5. When CI passes and maintainers approve, merge the PR/MR into `main`. This will cause `make ci` and `make cd CONFIRM=true BRANCH_NAME=main` to run, pushing out images tagged with `:main` and `:${GIT_HASH}`
-6. When a particular commit is ready to cut a release, **on main** add a git tag and push. This will cause `make release CONFIRM=true RELEASE_TAG=<applied git tag>` to run, pushing out an image tagged with `:${RELEASE_TAG}`
-
 ## Design
 
 The Cherry Servers CCM follows the standard design principles for external cloud controller managers.
@@ -193,21 +168,21 @@ The Cherry Servers CCM is similar to the standard Kubernetes versioning and bran
 
 * `main` is the main branch, and is the current development branch.
 * `vX.Y` is the release branch for a particular Kubernetes `major.minor` version, e.g. `v1.27`. This branch is created when the first work is done for a particular Kubernetes `major.minor` release, and is updated with any patches for that `major.minor` stream.
-
-`main` generally will be up to date with the most recent `vX.Y` branch, and will be the basis for the next `vX.Y+1` branch.
+* `main` and all version branches are protected from direct modification and only accept changes via pull requests.
 
 ### Creating a new version
 
 When a new Kubernetes `major.minor` version is released, create a new `vX.Y` branch from `main`.
 This branch is used for all patches to that `major.minor` version.
 
-### Patching a version
+### Working on existing branches
 
-When a new patch is required for a `vX.Y` branch, apply the fix to the HEAD of the specific branch.
+For changes that are specific to version `vX.Y`, e.g. bumping Kubernetes libraries, create a pull request to that branch.
 
-To simplify back-porting to version branches, use `backport vX.Y` labels.
-Then, if the original pull request is merged, pull requests to `vX.Y` branches,
-with cherry-picked commits, will be automatically opened.
+For non-branch-specific updates, create pull requests to `main`. If these updates need to propagate to
+version branches, use `backport vX.Y` labels - CI will then automatically create pull requests to those
+branches with cherry picked commits. If that fails due to conflicts, cherry pick the needed commits
+by hand and resolve as needed.
 
 ### Cutting a Release
 
