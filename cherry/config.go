@@ -22,6 +22,7 @@ const (
 	envVarAnnotationPeerIP        = "CHERRY_ANNOTATION_PEER_IP"
 	envVarAnnotationSrcIP         = "CHERRY_ANNOTATION_SRC_IP"
 	envVarAnnotationFIPRegion     = "CHERRY_ANNOTATION_FIP_REGION"
+	envVarAnnotationMultiHop      = "CHERRY_ANNOTATION_MULTI_HOP"
 	envVarFIPTag                  = "CHERRY_FIP_TAG"
 	envVarAPIServerPort           = "CHERRY_API_SERVER_PORT"
 	envVarBGPNodeSelector         = "CHERRY_BGP_NODE_SELECTOR"
@@ -40,6 +41,7 @@ type Config struct {
 	AnnotationPeerIP        string  `json:"annotationPeerIP,omitempty"`
 	AnnotationSrcIP         string  `json:"annotationSrcIP,omitempty"`
 	AnnotationFIPRegion     string  `json:"annotationFIPRegion,omitempty"`
+	AnnotationMultiHop      string  `json:"annotationMultiHop,omitempty"`
 	FIPTag                  string  `json:"fipTag,omitempty"`
 	APIServerPort           int32   `json:"apiServerPort,omitempty"`
 	BGPNodeSelector         string  `json:"bgpNodeSelector,omitempty"`
@@ -147,6 +149,12 @@ func getConfig(providerConfig io.Reader) (Config, error) {
 	annotationFIPRegion := os.Getenv(envVarAnnotationFIPRegion)
 	if annotationFIPRegion != "" {
 		config.AnnotationFIPRegion = annotationFIPRegion
+	}
+
+	config.AnnotationMultiHop = DefaultAnnotationMultiHop
+	annotationMultiHop := os.Getenv(envVarAnnotationMultiHop)
+	if annotationMultiHop != "" {
+		config.AnnotationMultiHop = annotationMultiHop
 	}
 
 	if rawConfig.FIPTag != "" {

@@ -39,18 +39,19 @@ type loadBalancers struct {
 	annotationPeerASN   string
 	annotationPeerIP    string
 	annotationSrcIP     string
+	annotationMultiHop  string
 	fipRegionAnnotation string
 	nodeSelector        labels.Selector
 	bgpEnabler
 }
 
-func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, projectID int, region, config string, annotationLocalASN, annotationPeerASN, annotationPeerIP, annotationSrcIP, fipRegionAnnotation, nodeSelector string, bgpEnabler bgpEnabler) (*loadBalancers, error) {
+func newLoadBalancers(client *cherrygo.Client, k8sclient kubernetes.Interface, projectID int, region, config string, annotationLocalASN, annotationPeerASN, annotationPeerIP, annotationSrcIP, fipRegionAnnotation, annotationMultiHop, nodeSelector string, bgpEnabler bgpEnabler) (*loadBalancers, error) {
 	selector := labels.Everything()
 	if nodeSelector != "" {
 		selector, _ = labels.Parse(nodeSelector)
 	}
 
-	l := &loadBalancers{client, k8sclient, projectID, region, "", nil, config, annotationLocalASN, annotationPeerASN, annotationPeerIP, annotationSrcIP, fipRegionAnnotation, selector, bgpEnabler}
+	l := &loadBalancers{client, k8sclient, projectID, region, "", nil, config, annotationLocalASN, annotationPeerASN, annotationPeerIP, annotationSrcIP, annotationMultiHop, fipRegionAnnotation, selector, bgpEnabler}
 
 	// parse the implementor config and see what kind it is - allow for no config
 	if l.implementorConfig == "" {
@@ -337,11 +338,13 @@ func (l *loadBalancers) annotateNode(ctx context.Context, node *v1.Node) error {
 			annotationPeerASN := strings.Replace(l.annotationPeerASN, "{{n}}", strconv.Itoa(i), 1)
 			annotationPeerIP := strings.Replace(l.annotationPeerIP, "{{n}}", strconv.Itoa(i), 1)
 			annotationSrcIP := strings.Replace(l.annotationSrcIP, "{{n}}", strconv.Itoa(i), 1)
+			annotationMultiHop := strings.Replace(l.annotationMultiHop, "{{n}}", strconv.Itoa(i), 1)
 
 			annotations[annotationLocalASN] = localASN
 			annotations[annotationPeerASN] = peerASN
 			annotations[annotationPeerIP] = peer.Address
 			annotations[annotationSrcIP] = bgpConfig.SourceIP
+			annotations[annotationMultiHop] = "true"
 		}
 	}
 
