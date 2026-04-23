@@ -15,9 +15,10 @@ The variables to run the script are as follows:
 * `DEBUG` - if set to any value, enables debug output
 * `CHERRY_AUTH_TOKEN` - required, the Cherry Servers API token to use
 * `CHERRY_REGION_NAME` - optional, the Cherry Servers region to deploy in; defaults to `LT-Siauliai`
-* `PROJECT_ID` - required, the Cherry Servers project ID to deploy in
+* `CHERRY_PROJECT_ID` - required, the Cherry Servers project ID to deploy in
 * `IMAGE` - optional, the Cherry Servers image to use; defaults to `ubuntu_24_04_64bit`
 * `PARTITION_SIZE` - optional, the size of the root partition to create, in GB; defaults to `40`
+* `K8S_VERSION` - required, the exact upstream Kubernetes version to test against, for example `1.33.10` or `v1.33.10`; the script resolves the newest released K3s tag matching that Kubernetes version and errors if none exists
 * `CCM_PATH` - required, the path to the CCM binary to use. It **must** be compiled for the target cluster platform before running the script.
 * `NO_CLEANUP` - if set to any value, does not clean up the temporary resources created, for debugging purposes
 

@@ -14,6 +14,7 @@ MIN_MEMORY=${MIN_MEMORY:-6} # GB
 PLAN_TYPE=${PLAN_TYPE:-vps} # plan type to select
 IMAGE=${IMAGE:-ubuntu_24_04_64bit}
 PARTITION_SIZE=${PARTITION_SIZE:-40} # GB
+K8S_VERSION=${K8S_VERSION:?Need to set K8S_VERSION env var}
 CCM_PATH=${CCM_PATH:?Need to set CCM_PATH env var}
 CHERRY_AUTH_TOKEN=${CHERRY_AUTH_TOKEN:?Need to set CHERRY_AUTH_TOKEN env var}
 
@@ -48,6 +49,39 @@ cleanup() {
 }
 trap cleanup EXIT
 
+resolve_k3s_version() {
+    local k8s_version="$1"
+    local normalized_version
+    local releases
+    local resolved_version
+
+    normalized_version="${k8s_version#v}"
+    if ! [[ "$normalized_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "K8S_VERSION must be an exact Kubernetes version like 1.33.10 or v1.33.10" >&2
+        return 1
+    fi
+
+    echo "Resolving latest k3s release for Kubernetes v${normalized_version}..." >&2
+    releases=$(curl -sfL "https://api.github.com/repos/k3s-io/k3s/releases?per_page=100") || {
+        echo "Failed to fetch k3s releases from GitHub" >&2
+        return 1
+    }
+
+    resolved_version=$(echo "$releases" | jq -r --arg version "$normalized_version" '
+        map(select(.prerelease == false and .draft == false))
+        | map(.tag_name)
+        | map(select(test("^v" + $version + "\\+k3s[0-9]+$")))
+        | .[0] // empty
+    ')
+
+    if [ -z "$resolved_version" ]; then
+        echo "No released k3s version found for Kubernetes v${normalized_version}" >&2
+        return 1
+    fi
+
+    echo "$resolved_version"
+}
+
 # find a slug for us
 if [ -z "$PLAN" ]; then
     echo "No PLAN specified, selecting one automatically"
@@ -79,6 +113,9 @@ SSH_KEY_RESULT=$(cherryctl ssh-key create --output json --key "$(cat "$SSH_PUBLI
 SSH_KEY_ID=$(echo "$SSH_KEY_RESULT" | jq -r '.id')
 echo "Created SSH key with ID: $SSH_KEY_ID"
 
+K3S_VERSION=$(resolve_k3s_version "$K8S_VERSION")
+echo "Using k3s version: $K3S_VERSION"
+
 # determine if we set the partition size or not
 PARTITION_ARG=""
 if [ "$PLAN_TYPE" = "baremetal" ]; then
@@ -86,7 +123,9 @@ if [ "$PLAN_TYPE" = "baremetal" ]; then
 fi
 
 echo "deploying control plane server with k3s"
-USERDATA_FILE_CONTROLPLANE="$(dirname "$0")/k3s-control-userdata.yaml"
+CONTROLPLANE_USERDATA_TEMPLATE="$(dirname "$0")/k3s-control-userdata.yaml"
+USERDATA_FILE_CONTROLPLANE="${TEMP_DIR}/k3s-control-userdata.yaml"
+sed "s/{{K3S_VERSION}}/${K3S_VERSION}/g" "$CONTROLPLANE_USERDATA_TEMPLATE" > "$USERDATA_FILE_CONTROLPLANE"
 RESULT=$(cherryctl server create --output json \
     --project-id ${PROJECT_ID} --hostname k8s-ccm-test-controlplane-1 \
     --plan ${PLAN} --region ${REGION} --image ${IMAGE} ${PARTITION_ARG} \
@@ -228,7 +267,7 @@ kubectl -n kube-system exec ${POD} -- sh -c "/start-ccm.sh >& /var/log/cloud-pro
 # first create userdata file with control plane IP
 WORKER_USERDATA_TEMPLATE="$(dirname "$0")/k3s-worker-userdata-tmpl.yaml"
 WORKER_USERDATA_FILE="${TEMP_DIR}/k3s-worker-userdata.yaml"
-cat "$WORKER_USERDATA_TEMPLATE" | sed "s/{{CONTROL_PLANE_IP}}/${IP_CONTROLPLANE}/g" | sed "s/{{K3S_TOKEN}}/${K3S_TOKEN}/g" > "${WORKER_USERDATA_FILE}"
+cat "$WORKER_USERDATA_TEMPLATE" | sed "s/{{CONTROL_PLANE_IP}}/${IP_CONTROLPLANE}/g" | sed "s/{{K3S_TOKEN}}/${K3S_TOKEN}/g" | sed "s/{{K3S_VERSION}}/${K3S_VERSION}/g" > "${WORKER_USERDATA_FILE}"
 echo "Created worker userdata file at: $WORKER_USERDATA_FILE"
 
 # create a worker node
