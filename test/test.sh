@@ -14,6 +14,7 @@ MIN_MEMORY=${MIN_MEMORY:-6} # GB
 PLAN_TYPE=${PLAN_TYPE:-vps} # plan type to select
 IMAGE=${IMAGE:-ubuntu_24_04_64bit}
 PARTITION_SIZE=${PARTITION_SIZE:-40} # GB
+KUBERNETES_DISTRO=${KUBERNETES_DISTRO:-k3s}
 K8S_VERSION=${K8S_VERSION:?Need to set K8S_VERSION env var}
 CCM_PATH=${CCM_PATH:?Need to set CCM_PATH env var}
 CHERRY_AUTH_TOKEN=${CHERRY_AUTH_TOKEN:?Need to set CHERRY_AUTH_TOKEN env var}
@@ -49,11 +50,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-resolve_k3s_version() {
+normalize_k8s_version() {
     local k8s_version="$1"
     local normalized_version
-    local releases
-    local resolved_version
 
     normalized_version="${k8s_version#v}"
     if ! [[ "$normalized_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -61,13 +60,21 @@ resolve_k3s_version() {
         return 1
     fi
 
-    echo "Resolving latest k3s release for Kubernetes v${normalized_version}..." >&2
+    echo "$normalized_version"
+}
+
+resolve_k3s_version() {
+    local k8s_version="$1"
+    local releases
+    local resolved_version
+
+    echo "Resolving latest k3s release for Kubernetes v${k8s_version}..." >&2
     releases=$(curl -sfL "https://api.github.com/repos/k3s-io/k3s/releases?per_page=100") || {
         echo "Failed to fetch k3s releases from GitHub" >&2
         return 1
     }
 
-    resolved_version=$(echo "$releases" | jq -r --arg version "$normalized_version" '
+    resolved_version=$(echo "$releases" | jq -r --arg version "$k8s_version" '
         map(select(.prerelease == false and .draft == false))
         | map(.tag_name)
         | map(select(test("^v" + $version + "\\+k3s[0-9]+$")))
@@ -75,11 +82,68 @@ resolve_k3s_version() {
     ')
 
     if [ -z "$resolved_version" ]; then
-        echo "No released k3s version found for Kubernetes v${normalized_version}" >&2
+        echo "No released k3s version found for Kubernetes v${k8s_version}" >&2
         return 1
     fi
 
     echo "$resolved_version"
+}
+
+wait_for_remote_marker() {
+    local host="$1"
+    local marker_file="$2"
+    local wait_seconds="$3"
+    local description="$4"
+    local passed=0
+    local interval=30
+
+    echo "waiting for ${description} on server ${host}"
+    while [ $passed -lt $wait_seconds ]; do
+        if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_PRIVATE_KEY" root@"${host}" "test -f ${marker_file}" 2>/dev/null; then
+            echo "${description} is ready on server ${host}"
+            return 0
+        fi
+        echo "${description} not ready yet, waiting ${interval} seconds..."
+        sleep $interval
+        passed=$(($passed + $interval))
+    done
+
+    return 1
+}
+
+wait_for_node_ready() {
+    local node_name="$1"
+    local wait_seconds="$2"
+    local description="$3"
+    local passed=0
+    local interval=15
+
+    echo "waiting for ${description}"
+    while [ $passed -lt $wait_seconds ]; do
+        if kubectl get node "${node_name}" 2>/dev/null | grep -q -i -w ready; then
+            echo "${description} is ready"
+            return 0
+        fi
+        echo "${description} not ready yet, waiting ${interval} seconds..."
+        sleep $interval
+        passed=$(($passed + $interval))
+    done
+
+    return 1
+}
+
+deploy_cni_if_needed() {
+    if [ "$KUBERNETES_DISTRO" != "kubeadm" ]; then
+        return 0
+    fi
+
+    echo "deploying flannel CNI for kubeadm cluster"
+    FLANNEL_VERSION=$(curl -sL https://api.github.com/repos/flannel-io/flannel/releases | jq -r 'map(select(.draft == false and .prerelease == false))[0].tag_name')
+    if [ -z "$FLANNEL_VERSION" ] || [ "$FLANNEL_VERSION" = "null" ]; then
+        echo "Failed to determine flannel release version"
+        return 1
+    fi
+    kubectl apply -f "https://github.com/flannel-io/flannel/releases/download/${FLANNEL_VERSION}/kube-flannel.yml"
 }
 
 # find a slug for us
@@ -113,8 +177,30 @@ SSH_KEY_RESULT=$(cherryctl ssh-key create --output json --key "$(cat "$SSH_PUBLI
 SSH_KEY_ID=$(echo "$SSH_KEY_RESULT" | jq -r '.id')
 echo "Created SSH key with ID: $SSH_KEY_ID"
 
-K3S_VERSION=$(resolve_k3s_version "$K8S_VERSION")
-echo "Using k3s version: $K3S_VERSION"
+NORMALIZED_K8S_VERSION=$(normalize_k8s_version "$K8S_VERSION")
+K8S_MINOR_VERSION=$(echo "$NORMALIZED_K8S_VERSION" | cut -d. -f1,2)
+
+case "$KUBERNETES_DISTRO" in
+    k3s)
+        K3S_VERSION=$(resolve_k3s_version "$NORMALIZED_K8S_VERSION")
+        echo "Using k3s version: $K3S_VERSION"
+        CONTROLPLANE_USERDATA_TEMPLATE="$(dirname "$0")/k3s-control-userdata.yaml"
+        WORKER_USERDATA_TEMPLATE="$(dirname "$0")/k3s-worker-userdata-tmpl.yaml"
+        CONTROLPLANE_READY_MARKER="/var/log/k3s-ready"
+        CONTROLPLANE_KUBECONFIG_REMOTE="/etc/rancher/k3s/k3s.yaml"
+        ;;
+    kubeadm)
+        echo "Using kubeadm Kubernetes version: v${NORMALIZED_K8S_VERSION}"
+        CONTROLPLANE_USERDATA_TEMPLATE="$(dirname "$0")/kubeadm-control-userdata.yaml"
+        WORKER_USERDATA_TEMPLATE="$(dirname "$0")/kubeadm-worker-userdata-tmpl.yaml"
+        CONTROLPLANE_READY_MARKER="/var/log/kubeadm-ready"
+        CONTROLPLANE_KUBECONFIG_REMOTE="/etc/kubernetes/admin.conf"
+        ;;
+    *)
+        echo "Unsupported KUBERNETES_DISTRO: ${KUBERNETES_DISTRO}. Expected one of: k3s, kubeadm"
+        exit 1
+        ;;
+esac
 
 # determine if we set the partition size or not
 PARTITION_ARG=""
@@ -122,10 +208,13 @@ if [ "$PLAN_TYPE" = "baremetal" ]; then
     PARTITION_ARG="--os-partition-size ${PARTITION_SIZE}"
 fi
 
-echo "deploying control plane server with k3s"
-CONTROLPLANE_USERDATA_TEMPLATE="$(dirname "$0")/k3s-control-userdata.yaml"
-USERDATA_FILE_CONTROLPLANE="${TEMP_DIR}/k3s-control-userdata.yaml"
-sed "s/{{K3S_VERSION}}/${K3S_VERSION}/g" "$CONTROLPLANE_USERDATA_TEMPLATE" > "$USERDATA_FILE_CONTROLPLANE"
+echo "deploying control plane server with ${KUBERNETES_DISTRO}"
+USERDATA_FILE_CONTROLPLANE="${TEMP_DIR}/${KUBERNETES_DISTRO}-control-userdata.yaml"
+cat "$CONTROLPLANE_USERDATA_TEMPLATE" \
+    | sed "s|{{K3S_VERSION}}|${K3S_VERSION}|g" \
+    | sed "s|{{K8S_VERSION}}|${NORMALIZED_K8S_VERSION}|g" \
+    | sed "s|{{K8S_MINOR_VERSION}}|${K8S_MINOR_VERSION}|g" \
+    > "$USERDATA_FILE_CONTROLPLANE"
 RESULT=$(cherryctl server create --output json \
     --project-id ${PROJECT_ID} --hostname k8s-ccm-test-controlplane-1 \
     --plan ${PLAN} --region ${REGION} --image ${IMAGE} ${PARTITION_ARG} \
@@ -156,50 +245,47 @@ if [ "$STATE" != "active" ]; then
 	exit 1
 fi
 
-# Get server IP for k3s readiness check
+# Get server IP for cluster readiness check
 IP_CONTROLPLANE=$(cherryctl server get $ID_CONTROLPLANE --output json | jq -r '.ip_addresses[] | select(.type == "primary-ip") | .address')
 [ -z "$IP_CONTROLPLANE" ] && { echo "Failed to get server IP address"; exit 1; }
-echo "server $ID_CONTROLPLANE deployed successfully at IP $IP_CONTROLPLANE, now checking k3s readiness..."
+echo "server $ID_CONTROLPLANE deployed successfully at IP $IP_CONTROLPLANE, now checking ${KUBERNETES_DISTRO} readiness..."
 
-# Wait for k3s to be ready
-echo "waiting for k3s to be ready on server $IP_CONTROLPLANE"
-PASSED=0
-INTERVAL=30
-K3S_READY=false
-
-while [ $PASSED -lt $K3SWAIT ]; do
-    # Check if k3s-ready marker file exists
-    if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_PRIVATE_KEY" root@${IP_CONTROLPLANE} "test -f /var/log/k3s-ready" 2>/dev/null; then
-        echo "control plane server k3s is ready on server $IP_CONTROLPLANE"
-        K3S_READY=true
-        break
-    else
-        echo "control plane server k3s not ready yet, waiting $INTERVAL seconds..."
-        sleep $INTERVAL
-        PASSED=$(($PASSED + $INTERVAL))
-    fi
-done
-
-if [ "$K3S_READY" != "true" ]; then
-    echo "control plane server k3s did not become ready in $K3SWAIT seconds"
-    echo "You can check k3s status manually by connecting to the server:"
+if ! wait_for_remote_marker "$IP_CONTROLPLANE" "$CONTROLPLANE_READY_MARKER" "$K3SWAIT" "control plane ${KUBERNETES_DISTRO}"; then
+    echo "control plane server ${KUBERNETES_DISTRO} did not become ready in $K3SWAIT seconds"
+    echo "You can check cluster status manually by connecting to the server:"
     echo "  ssh -i \"$SSH_PRIVATE_KEY\" root@$IP_CONTROLPLANE"
-    echo "  systemctl status k3s"
+    if [ "$KUBERNETES_DISTRO" = "k3s" ]; then
+        echo "  systemctl status k3s"
+    else
+        echo "  systemctl status kubelet"
+        echo "  crictl ps -a"
+    fi
     echo "  kubectl get nodes"
     exit 1
 fi
 
-# retrieve the kubeconfig and the token
+# retrieve the kubeconfig and any worker bootstrap credentials
 export KUBECONFIG=${TEMP_DIR}/kubeconfig
-K3S_TOKEN=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_PRIVATE_KEY" root@${IP_CONTROLPLANE} "cat /var/lib/rancher/k3s/server/node-token")
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_PRIVATE_KEY" root@${IP_CONTROLPLANE}:/etc/rancher/k3s/k3s.yaml ${KUBECONFIG}.orig
-cat ${KUBECONFIG}.orig | sed "s#127.0.0.1#$IP_CONTROLPLANE#g" > $KUBECONFIG
+if [ "$KUBERNETES_DISTRO" = "k3s" ]; then
+    K3S_TOKEN=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_PRIVATE_KEY" root@${IP_CONTROLPLANE} "cat /var/lib/rancher/k3s/server/node-token")
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_PRIVATE_KEY" root@${IP_CONTROLPLANE}:${CONTROLPLANE_KUBECONFIG_REMOTE} ${KUBECONFIG}.orig
+    sed "s#127.0.0.1#$IP_CONTROLPLANE#g" ${KUBECONFIG}.orig > $KUBECONFIG
+else
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_PRIVATE_KEY" root@${IP_CONTROLPLANE}:${CONTROLPLANE_KUBECONFIG_REMOTE} $KUBECONFIG
+    KUBEADM_JOIN_COMMAND=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i "$SSH_PRIVATE_KEY" root@${IP_CONTROLPLANE} "kubeadm token create --ttl 2h --print-join-command")
+    KUBEADM_TOKEN=$(echo "$KUBEADM_JOIN_COMMAND" | awk '{for (i = 1; i <= NF; i++) if ($i == "--token") {print $(i+1); exit}}')
+    KUBEADM_DISCOVERY_TOKEN_CA_CERT_HASH=$(echo "$KUBEADM_JOIN_COMMAND" | awk '{for (i = 1; i <= NF; i++) if ($i == "--discovery-token-ca-cert-hash") {print $(i+1); exit}}')
+    if [ -z "$KUBEADM_TOKEN" ] || [ -z "$KUBEADM_DISCOVERY_TOKEN_CA_CERT_HASH" ]; then
+        echo "Failed to parse kubeadm join command: $KUBEADM_JOIN_COMMAND"
+        exit 1
+    fi
+fi
 
 
 # this will error out if it fails
 kubectl get nodes
 
-echo "k3s control plane is ready!"
+echo "${KUBERNETES_DISTRO} control plane is ready!"
 echo "You can access the server via:"
 echo "    ssh -i \"$SSH_PRIVATE_KEY\" root@${IP_CONTROLPLANE}"
 echo "You can access kubernetes via:"
@@ -227,9 +313,11 @@ INTERVAL=1
 CCM_WAIT=30
 CCM_READY=false
 while [ $PASSED -lt $CCM_WAIT ]; do
-    PODSTATUS=$(kubectl -n kube-system get pod -l app=cloud-provider-cherry -o jsonpath='{.items[0].status.phase}')
+    PODSTATUS="$(kubectl -n kube-system get pod \
+        -l app=cloud-provider-cherry \
+        -o jsonpath='{.items[*].status.phase}' 2>/dev/null)"
     # Check if k3s-ready marker file exists
-    if [ "$PODSTATUS" = "Running" ]; then
+    if echo "$PODSTATUS" | grep -qw "Running"; then
         echo "CCM pod is ready"
         CCM_READY=true
         break
@@ -263,15 +351,35 @@ kubectl -n kube-system cp ${CCM_SCRIPT} ${POD}:/start-ccm.sh
 kubectl -n kube-system exec ${POD} -- sh -c "chmod +x /cloud-provider-cherry && chmod +x /start-ccm.sh"
 kubectl -n kube-system exec ${POD} -- sh -c "/start-ccm.sh >& /var/log/cloud-provider-cherry.log &"
 
+if ! deploy_cni_if_needed; then
+    echo "Failed to deploy CNI for kubeadm cluster"
+    exit 1
+fi
+
+if [ "$KUBERNETES_DISTRO" = "kubeadm" ]; then
+    if ! wait_for_node_ready "k8s-ccm-test-controlplane-1" "$K3SWAIT" "control plane node k8s-ccm-test-controlplane-1"; then
+        echo "control plane node did not become Ready in $K3SWAIT seconds after CNI deployment"
+        exit 1
+    fi
+fi
+
 # deploy a worker node
-# first create userdata file with control plane IP
-WORKER_USERDATA_TEMPLATE="$(dirname "$0")/k3s-worker-userdata-tmpl.yaml"
-WORKER_USERDATA_FILE="${TEMP_DIR}/k3s-worker-userdata.yaml"
-cat "$WORKER_USERDATA_TEMPLATE" | sed "s/{{CONTROL_PLANE_IP}}/${IP_CONTROLPLANE}/g" | sed "s/{{K3S_TOKEN}}/${K3S_TOKEN}/g" | sed "s/{{K3S_VERSION}}/${K3S_VERSION}/g" > "${WORKER_USERDATA_FILE}"
+# first create userdata file with cluster join settings
+WORKER_USERDATA_FILE="${TEMP_DIR}/${KUBERNETES_DISTRO}-worker-userdata.yaml"
+cat "$WORKER_USERDATA_TEMPLATE" \
+    | sed "s|{{CONTROL_PLANE_IP}}|${IP_CONTROLPLANE}|g" \
+    | sed "s|{{CONTROL_PLANE_ENDPOINT}}|${IP_CONTROLPLANE}|g" \
+    | sed "s|{{K3S_TOKEN}}|${K3S_TOKEN}|g" \
+    | sed "s|{{K3S_VERSION}}|${K3S_VERSION}|g" \
+    | sed "s|{{K8S_VERSION}}|${NORMALIZED_K8S_VERSION}|g" \
+    | sed "s|{{K8S_MINOR_VERSION}}|${K8S_MINOR_VERSION}|g" \
+    | sed "s|{{KUBEADM_TOKEN}}|${KUBEADM_TOKEN}|g" \
+    | sed "s|{{DISCOVERY_TOKEN_CA_CERT_HASH}}|${KUBEADM_DISCOVERY_TOKEN_CA_CERT_HASH}|g" \
+    > "${WORKER_USERDATA_FILE}"
 echo "Created worker userdata file at: $WORKER_USERDATA_FILE"
 
 # create a worker node
-echo "deploying worker with k3s"
+echo "deploying worker with ${KUBERNETES_DISTRO}"
 PARTITION_ARG=""
 if [ "$PLAN_TYPE" = "baremetal" ]; then
     PARTITION_ARG="--os-partition-size ${PARTITION_SIZE}"
@@ -307,32 +415,14 @@ if [ "$STATE" != "active" ]; then
 	exit 1
 fi
 
-# Get server IP for k3s readiness check
+# Get server IP for worker readiness check
 IP_WORKER=$(cherryctl server get $ID_WORKER --output json | jq -r '.ip_addresses[] | select(.type == "primary-ip") | .address')
 [ -z "$IP_WORKER" ] && { echo "Failed to get server IP address"; exit 1; }
-echo "server $ID_WORKER deployed successfully at IP $IP_WORKER, now checking k3s readiness..."
+echo "server $ID_WORKER deployed successfully at IP $IP_WORKER, now checking cluster readiness..."
 
-# wait for the worker to be ready in k3s
-echo "waiting for worker node to be ready in k3s"
-PASSED=0
-INTERVAL=15
-WORKER_READY=false
-while [ $PASSED -lt $K3SWAIT ]; do
-    # Check if the worker node appears in kubectl get nodes
-    if kubectl get node "k8s-ccm-test-worker-1" | grep -q -i -w ready; then
-        echo "worker node k8s-ccm-test-worker-1 is now ready in k3s"
-        WORKER_READY=true
-        break
-    else
-        echo "worker node not visible yet, waiting $INTERVAL seconds..."
-        sleep $INTERVAL
-        PASSED=$(($PASSED + $INTERVAL))
-    fi
-done
-
-if [ "$WORKER_READY" != "true" ]; then
+if ! wait_for_node_ready "k8s-ccm-test-worker-1" "$K3SWAIT" "worker node k8s-ccm-test-worker-1"; then
     echo "worker node did not become ready in $K3SWAIT seconds"
-    echo "You can check k3s status manually by connecting to the server:"
+    echo "You can check cluster status manually by connecting to the server:"
     echo "  ssh -i \"$SSH_PRIVATE_KEY\" root@$IP_CONTROLPLANE"
     echo "  kubectl get nodes"
     exit 1
@@ -369,7 +459,7 @@ fi
 # remove the node in cherryservers, see that it disappears from the cluster
 cherryctl server delete $ID_WORKER --force
 
-echo "$(date) waiting for worker node to be removed from k3s"
+echo "$(date) waiting for worker node to be removed from the cluster"
 PASSED=0
 INTERVAL=10
 WORKER_REMOVED=false
@@ -377,24 +467,24 @@ WORKER_REMOVAL_WAIT=120
 while [ $PASSED -lt $WORKER_REMOVAL_WAIT ]; do
     # Check if the worker node appears in kubectl get nodes
     if kubectl get node "k8s-ccm-test-worker-1" 2>&1 | grep -q 'NotFound'; then
-        echo "$(date) worker node k8s-ccm-test-worker-1 has been removed from k3s after server deletion"
+        echo "$(date) worker node k8s-ccm-test-worker-1 has been removed from the cluster after server deletion"
         WORKER_REMOVED=true
         break
     else
-        echo "worker node k8s-ccm-test-worker-1 is still present in k3s after server deletion, waiting $INTERVAL seconds..."
+        echo "worker node k8s-ccm-test-worker-1 is still present in the cluster after server deletion, waiting $INTERVAL seconds..."
         sleep $INTERVAL
         PASSED=$(($PASSED + $INTERVAL))
     fi
 done
 
 if [ "$WORKER_REMOVED" != "true" ]; then
-    echo "$(date) worker node k8s-ccm-test-worker-1 was not removed from k3s in $WORKER_REMOVAL_WAIT seconds after server deletion"
+    echo "$(date) worker node k8s-ccm-test-worker-1 was not removed from the cluster in $WORKER_REMOVAL_WAIT seconds after server deletion"
     exit 1
 fi
 
 ## load balancer tests; we need to add a worker
 
-echo "deploying worker with k3s"
+echo "deploying worker with ${KUBERNETES_DISTRO}"
 PARTITION_ARG=""
 if [ "$PLAN_TYPE" = "baremetal" ]; then
     PARTITION_ARG="--os-partition-size ${PARTITION_SIZE}"
@@ -430,32 +520,14 @@ if [ "$STATE" != "active" ]; then
 	exit 1
 fi
 
-# Get server IP for k3s readiness check
+# Get server IP for worker readiness check
 IP_WORKER=$(cherryctl server get $ID_WORKER --output json | jq -r '.ip_addresses[] | select(.type == "primary-ip") | .address')
 [ -z "$IP_WORKER" ] && { echo "Failed to get server IP address"; exit 1; }
-echo "server $ID_WORKER deployed successfully at IP $IP_WORKER, now checking k3s readiness..."
+echo "server $ID_WORKER deployed successfully at IP $IP_WORKER, now checking cluster readiness..."
 
-# wait for the worker to be ready in k3s
-echo "waiting for worker node to be ready in k3s"
-PASSED=0
-INTERVAL=15
-WORKER_READY=false
-while [ $PASSED -lt $K3SWAIT ]; do
-    # Check if the worker node appears in kubectl get nodes
-    if kubectl get node "k8s-ccm-test-worker-1" | grep -q -i -w ready; then
-        echo "worker node k8s-ccm-test-worker-1 is now ready in k3s"
-        WORKER_READY=true
-        break
-    else
-        echo "worker node not visible yet, waiting $INTERVAL seconds..."
-        sleep $INTERVAL
-        PASSED=$(($PASSED + $INTERVAL))
-    fi
-done
-
-if [ "$WORKER_READY" != "true" ]; then
+if ! wait_for_node_ready "k8s-ccm-test-worker-1" "$K3SWAIT" "worker node k8s-ccm-test-worker-1"; then
     echo "worker node did not become ready in $K3SWAIT seconds"
-    echo "You can check k3s status manually by connecting to the server:"
+    echo "You can check cluster status manually by connecting to the server:"
     echo "  ssh -i \"$SSH_PRIVATE_KEY\" root@$IP_CONTROLPLANE"
     echo "  kubectl get nodes"
     exit 1
