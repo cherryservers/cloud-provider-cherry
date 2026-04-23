@@ -39,7 +39,16 @@ runcmd:
     echo "Detected external IP: $EXTERNAL_IP"
     INTERNAL_IP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | grep -E '^10\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^192\.168\.' | head -n1)
     echo "Detected internal IP: $INTERNAL_IP"
+    INSTALL_K3S_VERSION="{{K3S_VERSION}}"
+    INSTALL_K3S_VERSION_ARG=""
+    if [ -n "$INSTALL_K3S_VERSION" ]; then
+      INSTALL_K3S_VERSION_ARG="INSTALL_K3S_VERSION=${INSTALL_K3S_VERSION}"
+      echo "Installing pinned k3s version: $INSTALL_K3S_VERSION"
+    else
+      echo "Installing default k3s version from installer channel"
+    fi
     curl -sfL https://get.k3s.io | \
+    env ${INSTALL_K3S_VERSION_ARG} \
     K3S_URL="https://${CONTROL_PLANE_IP}:6443" \
     K3S_TOKEN="{{K3S_TOKEN}}" \
     INSTALL_K3S_EXEC="--kubelet-arg=cloud-provider=external \

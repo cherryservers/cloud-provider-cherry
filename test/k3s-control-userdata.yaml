@@ -32,7 +32,15 @@ runcmd:
     echo "Detected external IP: $EXTERNAL_IP"
     INTERNAL_IP=$(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1 | grep -E '^10\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^192\.168\.' | head -n1)
     echo "Detected internal IP: $INTERNAL_IP"
-    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable=traefik \
+    INSTALL_K3S_VERSION="{{K3S_VERSION}}"
+    INSTALL_K3S_VERSION_ARG=""
+    if [ -n "$INSTALL_K3S_VERSION" ]; then
+      INSTALL_K3S_VERSION_ARG="INSTALL_K3S_VERSION=${INSTALL_K3S_VERSION}"
+      echo "Installing pinned k3s version: $INSTALL_K3S_VERSION"
+    else
+      echo "Installing default k3s version from installer channel"
+    fi
+    curl -sfL https://get.k3s.io | env ${INSTALL_K3S_VERSION_ARG} INSTALL_K3S_EXEC="--disable=traefik \
                     --disable=servicelb \
                     --disable-cloud-controller \
                     --kubelet-arg=cloud-provider=external \
