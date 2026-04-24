@@ -11,5 +11,6 @@ const (
 	DefaultAnnotationSrcIP        = "cherryservers.com/bgp-peers-{{n}}-src-ip"
 	DefaultAnnotationBGPPass      = "cherryservers.com/bgp-peers-{{n}}-bgp-pass"
 	DefaultAnnotationFIPRegion    = "cherryservers.com/fip-region"
+	DefaultAnnotationMultiHop     = "cherryservers.com/bgp-peers-{{n}}-peer-multi-hop"
 	AnnotationLoadBalancerManaged = "cherryservers.com/loadbalancer-managed"
 )
