@@ -18,7 +18,8 @@ The variables to run the script are as follows:
 * `CHERRY_PROJECT_ID` - required, the Cherry Servers project ID to deploy in
 * `IMAGE` - optional, the Cherry Servers image to use; defaults to `ubuntu_24_04_64bit`
 * `PARTITION_SIZE` - optional, the size of the root partition to create, in GB; defaults to `40`
-* `K8S_VERSION` - required, the exact upstream Kubernetes version to test against, for example `1.33.10` or `v1.33.10`; the script resolves the newest released K3s tag matching that Kubernetes version and errors if none exists
+* `KUBERNETES_DISTRO` - optional, which bootstrap path to use; supported values are `k3s` and `kubeadm`; defaults to `k3s`
+* `K8S_VERSION` - required, the exact upstream Kubernetes version to test against, for example `1.33.10` or `v1.33.10`; with `KUBERNETES_DISTRO=k3s`, the script resolves the newest released K3s tag matching that Kubernetes version and errors if none exists; with `KUBERNETES_DISTRO=kubeadm`, the script installs that exact upstream version via kubeadm and uses Flannel as the CNI
 * `CCM_PATH` - required, the path to the CCM binary to use. It **must** be compiled for the target cluster platform before running the script.
 * `NO_CLEANUP` - if set to any value, does not clean up the temporary resources created, for debugging purposes
 
