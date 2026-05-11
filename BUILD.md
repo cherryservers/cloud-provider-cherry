@@ -184,6 +184,9 @@ version branches, use `backport vX.Y` labels - CI will then automatically create
 branches with cherry picked commits. If that fails due to conflicts, cherry pick the needed commits
 by hand and resolve as needed.
 
+When a pull request needs to be merged into main **and** backported to supported versions, the `ignore-for-release` label
+should also be added to the pull request into `main`. This helps keep the release changelog clean on next major release by omitting pull requests that have already been merged into old version branches.
+
 ### Cutting a Release
 
 To cut a release, tag a commit on the branch. The tag should be of the form `vX.Y.Z`,
