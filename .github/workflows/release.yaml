@@ -105,7 +105,24 @@ jobs:
       env:
         RELEASE_IMG: ghcr.io/${{ env.IMAGE_NAME }}:${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
       run: cat deploy/template/deployment.yaml | sed 's#RELEASE_IMG#${{ env.RELEASE_IMG }}#g' > /tmp/deployment.yaml
-    - name: Generate Release Notes
+
+    - name: Set default release note
+      run: echo 'RELEASE_NOTES=Compatibility with matching k8s version.' >> $GITHUB_ENV
+
+    # patch-like just means a non-zero Z in vX.Y.Z, since we don't strictly adhere to semver.
+    - name: Check if patch-like release
+      id: release-ver
+      run: | 
+        TAG="${GITHUB_REF#refs/tags/}"
+
+        if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[1-9][0-9]*$ ]]; then
+          echo "is_patch=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_patch=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Generate patch-like release notes
+      if: steps.release-ver.outputs.is_patch == 'true'
       run: |
         release_notes=$(gh api repos/{owner}/{repo}/releases/generate-notes -F tag_name=${{ github.ref }} --jq .body)
         echo 'RELEASE_NOTES<<EOF' >> $GITHUB_ENV
@@ -115,6 +132,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         OWNER: ${{ github.repository_owner }}
         REPO: ${{ github.event.repository.name }}
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
