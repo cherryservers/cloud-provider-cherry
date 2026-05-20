@@ -89,7 +89,7 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 	if err != nil {
 		klog.Fatalf("could not initialize BGP: %v", err)
 	}
-	lb, err := newLoadBalancers(c.client, clientset, projectID, c.config.Region, c.config.LoadBalancerSetting, c.config.AnnotationLocalASN, c.config.AnnotationPeerASN, c.config.AnnotationPeerIP, c.config.AnnotationSrcIP, c.config.AnnotationFIPRegion, c.config.BGPNodeSelector, bgp)
+	lb, err := newLoadBalancers(c.client, clientset, projectID, c.config.Region, c.config.LoadBalancerSetting, c.config.AnnotationLocalASN, c.config.AnnotationPeerASN, c.config.AnnotationPeerIP, c.config.AnnotationSrcIP, c.config.AnnotationFIPRegion, c.config.AnnotationMultiHop, c.config.BGPNodeSelector, bgp)
 	if err != nil {
 		klog.Fatalf("could not initialize LoadBalancers: %v", err)
 	}
