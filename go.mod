@@ -105,7 +105,6 @@ require (
 // place all k8s.io direct dependencies in this section to make it easier to update them together
 require (
 	k8s.io/api v0.36.0
-	k8s.io/apiextensions-apiserver v0.36.0 // indirect
 	k8s.io/apimachinery v0.36.0
 	k8s.io/apiserver v0.36.0 // indirect
 	k8s.io/client-go v0.36.0
@@ -119,7 +118,7 @@ require (
 	k8s.io/streaming v0.36.0 // indirect
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.34.0 // indirect
-	sigs.k8s.io/controller-runtime v0.23.3
+	sigs.k8s.io/controller-runtime v0.24.1
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.0 // indirect
