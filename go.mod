@@ -8,7 +8,7 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/pallinder/go-randomdata v1.2.0
 	github.com/spf13/pflag v1.0.10
-	go.universe.tf/metallb v0.15.2
+	go.universe.tf/metallb v0.16.1
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
 )
 
