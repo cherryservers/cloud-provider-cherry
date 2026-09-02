@@ -3,7 +3,7 @@ module github.com/cherryservers/cloud-provider-cherry
 go 1.26.0
 
 require (
-	github.com/cherryservers/cherrygo/v3 v3.9.0
+	github.com/cherryservers/cherrygo/v3 v3.9.1
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/pallinder/go-randomdata v1.2.0
