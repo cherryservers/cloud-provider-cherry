@@ -1,0 +1,31 @@
+name: "Vulnerability check"
+
+on:
+  schedule:
+    - cron: "0 5 */3 * *"
+
+jobs:
+  vuln_check:
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [v1.37, v1.36, v1.35]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: "${{ matrix.ref }}"
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          repo-checkout: false
+          # See https://github.com/golang/go/issues/70036
+          go-version-input: ""
+          go-version-file: go.mod
