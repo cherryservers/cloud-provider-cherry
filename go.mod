@@ -4,12 +4,12 @@ go 1.27.0
 
 // direct deps
 require (
-	github.com/cherryservers/cherrygo/v3 v3.9.0
+	github.com/cherryservers/cherrygo/v3 v3.9.1
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/pallinder/go-randomdata v1.2.0
 	github.com/spf13/pflag v1.0.10
-	go.universe.tf/metallb v0.15.2
+	go.universe.tf/metallb v0.16.1
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
@@ -120,5 +120,4 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
-	sigs.k8s.io/structured-merge-diff/v7 v7.0.0 // indirect
 )
