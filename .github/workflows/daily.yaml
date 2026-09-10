@@ -1,0 +1,50 @@
+# This file contains jobs that need to be performed daily.
+name: Daily
+
+on:
+  schedule:
+    - cron: "0 5 */1 * *"
+
+permissions:
+  contents: read
+
+jobs:
+  branches:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # Needed to fetch all tags/branches
+
+      - id: set-matrix
+        run: |
+          # Get the 3 most recent minor version branches, as per our supported version policy.
+          BRANCHES=$(git tag -l "v*" | cut -d "." -f 1,2 | sort -r -u | head -n 3 | jq -R -s -c 'split("\n")[:-1]')
+
+          echo "matrix=$BRANCHES" >> $GITHUB_OUTPUT
+          echo "Generated matrix: $BRANCHES"
+
+  vuln_check:
+    needs: branches
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJson(needs.branches.outputs.matrix) }}
+
+    steps:
+      - name: Checkout repository
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: "${{ matrix.ref }}"
+
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          repo-checkout: false
+          # See https://github.com/golang/go/issues/70036
+          go-version-input: ""
+          go-version-file: go.mod
