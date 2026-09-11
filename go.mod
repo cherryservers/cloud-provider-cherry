@@ -1,6 +1,6 @@
 module github.com/cherryservers/cloud-provider-cherry
 
-go 1.25.0
+go 1.27.0
 
 require (
 	github.com/cherryservers/cherrygo/v3 v3.9.1
