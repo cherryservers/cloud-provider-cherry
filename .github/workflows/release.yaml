@@ -19,6 +19,10 @@ jobs:
     steps:
     - name: checkout
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      id: setup-go
+      with:
+        go-version-file: go.mod
     - name: Set up QEMU for cross-building
       uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
     - name: Set up Docker Buildx
@@ -68,6 +72,7 @@ jobs:
         build-args: |
           BINARY=cloud-provider-cherry
           LDFLAGS=-X 'k8s.io/component-base/version.gitVersion=${{ env.VERSION }}' -X 'k8s.io/component-base/version/verflag.programName=Cloud Provider Cherry Servers'
+          GOVER=${{ steps.setup-go.outputs.go-version }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         platforms: linux/amd64,linux/arm64
