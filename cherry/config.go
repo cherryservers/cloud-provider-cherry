@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strconv"
 
@@ -75,7 +74,7 @@ func (c Config) Strings() []string {
 func getConfig(providerConfig io.Reader) (Config, error) {
 	// get our token and project
 	var config, rawConfig Config
-	configBytes, err := ioutil.ReadAll(providerConfig)
+	configBytes, err := io.ReadAll(providerConfig)
 	if err != nil {
 		return config, fmt.Errorf("failed to read configuration : %w", err)
 	}

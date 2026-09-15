@@ -3,12 +3,12 @@ package metallb
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	metalapi "go.universe.tf/metallb/api/v1beta1"
-	"golang.org/x/exp/slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
